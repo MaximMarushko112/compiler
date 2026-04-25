@@ -10,7 +10,7 @@ namespace Parsing {
 
 struct ParsingInfo {
     TranslationUnit ast;
-    std::unordered_map<const void*, Position> positions; // позиция каждого узла
+    std::unordered_map<const void*, Util::Position> positions; // позиция каждого узла
     std::vector<std::string> errors;
     std::vector<std::string> warnings;
 };

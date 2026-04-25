@@ -1,5 +1,6 @@
 #pragma once
 
+#include <iostream>
 #include <string>
 #include <variant>
 
@@ -8,6 +9,9 @@ namespace Tokenization {
 // Макрос для пустых токенов (операторы, ключевые слова, разделители)
 #define TOKEN_STRUCT(name) struct name { \
     friend bool operator==(const name&, const name&) = default; \
+    friend std::ostream& operator<<(std::ostream& os, const name&) { \
+        return os << #name; \
+    }\
 };
 
 // ---- Операторы (в порядке увеличения сложности) ----
@@ -100,22 +104,34 @@ TOKEN_STRUCT(False)       // false
 struct IntLiteral {
     int value;
     friend bool operator==(const IntLiteral&, const IntLiteral&) = default;
+    friend std::ostream& operator<<(std::ostream& os, const IntLiteral& lit) {
+        return os << "IntLiteral(" << lit.value << ")";
+    }
 };
 
 struct FloatLiteral {
     float value;
     friend bool operator==(const FloatLiteral&, const FloatLiteral&) = default;
+    friend std::ostream& operator<<(std::ostream& os, const FloatLiteral& lit) {
+        return os << "FloatLiteral(" << lit.value << ")";
+    }
 };
 
 struct StringLiteral {
     std::string value;
     friend bool operator==(const StringLiteral&, const StringLiteral&) = default;
+    friend std::ostream& operator<<(std::ostream& os, const StringLiteral& lit) {
+        return os << "StringLiteral(" << lit.value << ")";
+    }
 };
 
 // ---- Идентификатор ----
 struct Identifier {
     std::string name;
     friend bool operator==(const Identifier&, const Identifier&) = default;
+    friend std::ostream& operator<<(std::ostream& os, const Identifier& id) {
+        return os << "Identifier(" << id.name << ")";
+    }
 };
 
 #undef TOKEN_STRUCT
@@ -145,5 +161,10 @@ using TokenVariant = std::variant<
     // Идентификатор
     Identifier
 >;
+
+inline std::ostream& operator<<(std::ostream& os, const TokenVariant& tv) {
+    std::visit([&os](const auto& tok) { os << tok; }, tv);
+    return os;
+}
 
 } // namespace Tokenization

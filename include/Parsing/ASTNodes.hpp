@@ -57,10 +57,15 @@ using TypeVariants = Util::TTuple<
     NamedType, PointerType, ArrayType, FunctionType, TupleType
 >;
 
-struct TypeNode : Util::TupleToVariant<TypeVariants>::Result {
+struct TypeNode : Util::TupleToVariant<TypeVariants> {
+    TypeNode(const TypeNode&) = delete;
+    TypeNode& operator=(const TypeNode&) = delete;
+    TypeNode(TypeNode&&) = default;
+    TypeNode& operator=(TypeNode&&) = default;
+    
     template<typename... Args>
     TypeNode(Args&&... args)
-        : Util::TupleToVariant<TypeVariants>::Result(std::forward<Args>(args)...) {}
+        : Util::TupleToVariant<TypeVariants>(std::forward<Args>(args)...) {}
 };
 
 // ---------- Выражения ----------
@@ -117,6 +122,10 @@ struct AssignExpr {
     enum class Op { Assign, AddAssign, SubAssign, MulAssign, DivAssign, RemAssign,
                     ShiftLeftAssign, ShiftRightAssign, AndAssign, XorAssign, OrAssign };
     Op op;
+};
+
+struct InitListExpr {
+    std::vector<Util::Boxed<ExprNode>> values;
 };
 
 // Множественное присваивание (a, b = c, d)
@@ -177,6 +186,15 @@ struct ExprStmt {
 // Блок
 struct BlockStmt {
     std::vector<Util::Boxed<StmtNode>> statements;
+
+    BlockStmt() = default;
+    BlockStmt(const BlockStmt&) = delete;
+    BlockStmt& operator=(const BlockStmt&) = delete;
+    BlockStmt(BlockStmt&&) = default;
+    BlockStmt& operator=(BlockStmt&&) = default;
+
+    explicit BlockStmt(std::vector<Util::Boxed<StmtNode>> stmts)
+        : statements(std::move(stmts)) {}
 };
 
 // If
@@ -215,6 +233,14 @@ struct SwitchStmt {
 // Case
 struct CaseLabel {
     Util::Boxed<ExprNode> value;
+
+    CaseLabel() = default;
+    CaseLabel(const CaseLabel&) = delete;
+    CaseLabel& operator=(const CaseLabel&) = delete;
+    CaseLabel(CaseLabel&&) = default;
+    CaseLabel& operator=(CaseLabel&&) = default;
+
+    CaseLabel(Util::Boxed<ExprNode> v) : value(std::move(v)) {}
 };
 
 struct DefaultLabel {};
@@ -253,29 +279,48 @@ using StmtVariants = Util::TTuple<
     GotoStmt, LabelStmt, VarDeclStmt
 >;
 
-struct StmtNode : Util::TupleToVariant<StmtVariants>::Result {
+struct StmtNode : Util::TupleToVariant<StmtVariants> {
+    StmtNode(const StmtNode&) = delete;
+    StmtNode& operator=(const StmtNode&) = delete;
+    StmtNode(StmtNode&&) = default;
+    StmtNode& operator=(StmtNode&&) = default;
+
     template<typename... Args>
     StmtNode(Args&&... args)
-        : Util::TupleToVariant<StmtVariants>::Result(std::forward<Args>(args)...) {}
+        : Util::TupleToVariant<StmtVariants>(std::forward<Args>(args)...) {}
 };
 
 // Все выражения (ExprNode)
 using ExprVariants = Util::TTuple<
     IntLiteral, FloatLiteral, StringLiteral, BoolLiteral,
     VariableExpr, UnaryOp, BinaryOp, AssignExpr, MultiAssignExpr,
-    ConditionalExpr, CallExpr, FieldAccessExpr, IndexExpr, CastExpr, SizeofExpr
+    ConditionalExpr, CallExpr, FieldAccessExpr, IndexExpr, CastExpr, SizeofExpr,
+    InitListExpr
 >;
 
-struct ExprNode : Util::TupleToVariant<ExprVariants>::Result {
+struct ExprNode : Util::TupleToVariant<ExprVariants> {
+    ExprNode(const ExprNode&) = delete;
+    ExprNode& operator=(const ExprNode&) = delete;
+    ExprNode(ExprNode&&) = default;
+    ExprNode& operator=(ExprNode&&) = default;
+
     template<typename... Args>
     ExprNode(Args&&... args)
-        : Util::TupleToVariant<ExprVariants>::Result(std::forward<Args>(args)...) {}
+        : Util::TupleToVariant<ExprVariants>(std::forward<Args>(args)...) {}
 };
 
 // ---------- Определения верхнего уровня ----------
 struct Param {
     std::string name;
     TypeNode type;
+
+    Param() = default;
+    Param(const Param&) = delete;
+    Param& operator=(const Param&) = delete;
+    Param(Param&&) = default;
+    Param& operator=(Param&&) = default;
+
+    Param(std::string n, TypeNode t) : name(std::move(n)), type(std::move(t)) {}
 };
 
 // Функция
@@ -285,6 +330,15 @@ struct FunctionDef {
     std::vector<TypeNode> returnTypes;   // несколько типов
     bool variadic;                       // есть ...
     std::optional<BlockStmt> body;       // тело может отсутствовать (объявление)
+
+    FunctionDef() = default;
+    FunctionDef(const FunctionDef&) = delete;
+    FunctionDef& operator=(const FunctionDef&) = delete;
+    FunctionDef(FunctionDef&&) = default;
+    FunctionDef& operator=(FunctionDef&&) = default;
+
+    FunctionDef(std::string n, std::vector<Param> p, std::vector<TypeNode> r, bool v, std::optional<BlockStmt> b)
+        : name(std::move(n)), parameters(std::move(p)), returnTypes(std::move(r)), variadic(v), body(std::move(b)) {}
 };
 
 // Глобальная переменная
@@ -292,6 +346,15 @@ struct GlobalVarDef {
     TypeNode type;
     std::string name;
     std::optional<ExprNode> initializer;
+
+    GlobalVarDef() = default;
+    GlobalVarDef(const GlobalVarDef&) = delete;
+    GlobalVarDef& operator=(const GlobalVarDef&) = delete;
+    GlobalVarDef(GlobalVarDef&&) = default;
+    GlobalVarDef& operator=(GlobalVarDef&&) = default;
+
+    GlobalVarDef(TypeNode t, std::string n, std::optional<ExprNode> init)
+        : type(std::move(t)), name(std::move(n)), initializer(std::move(init)) {}
 };
 
 // Структура
@@ -308,10 +371,15 @@ struct EnumDef {
 
 using DefVariants = Util::TTuple<FunctionDef, GlobalVarDef, StructDef, EnumDef>;
 
-struct DefNode : Util::TupleToVariant<DefVariants>::Result {
+struct DefNode : Util::TupleToVariant<DefVariants> {
+    DefNode(const DefNode&) = delete;
+    DefNode& operator=(const DefNode&) = delete;
+    DefNode(DefNode&&) = default;
+    DefNode& operator=(DefNode&&) = default;
+
     template<typename... Args>
     DefNode(Args&&... args)
-        : Util::TupleToVariant<DefVariants>::Result(std::forward<Args>(args)...) {}
+        : Util::TupleToVariant<DefVariants>(std::forward<Args>(args)...) {}
 };
 
 // Корень программы

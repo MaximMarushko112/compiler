@@ -1,5 +1,6 @@
 #include "../../include/Parsing/Parser.hpp"
 #include <cassert>
+#include <iostream>
 #include <optional>
 #include <variant>
 #include <../include/Utils/Overloaded.hpp>
@@ -8,8 +9,15 @@ namespace Parsing {
 
 namespace detail {
 
+auto printToken = [](const auto& it, const auto& end, const char* func) {
+    if (it == end)
+        std::cerr << func << ": END OF TOKENS\n";
+    else
+        std::cerr << func << ": token = " << it->token << " at " << it->position.toString() << "\n";
+};
+
 // ---------- Утилиты ----------
-[[noreturn]] void throwSyntaxError(const Position& pos, const std::string& message) {
+[[noreturn]] void throwSyntaxError(const Util::Position& pos, const std::string& message) {
     throw std::runtime_error("Syntax error at " + pos.toString() + ": " + message);
 }
 
@@ -20,14 +28,14 @@ namespace detail {
 }
 
 template<typename Iter>
-const Position& currentPosition(Iter it, Iter end) {
+const Util::Position& currentPosition(Iter it, Iter end) {
     if (it == end) throw std::runtime_error("Unexpected end of tokens");
     return it->position;
 }
 
 template<typename Iter>
 void expectToken(Iter& it, Iter end, auto tokenType, const std::string& expected) {
-    if (it == end) throwSyntaxError(it[-1].position, "Unexpected end, expected " + expected);
+    if (it == end) throwSyntaxError(it[-1].Position, "Unexpected end, expected " + expected);
     if (!std::holds_alternative<decltype(tokenType)>(it->token))
         throwSyntaxError(it->position, "Expected " + expected);
     ++it;
@@ -50,15 +58,17 @@ class TypeParser {
 public:
     template<typename Iter>
     static TypeNode parse(Iter& it, Iter end) {
+        std::cerr << "TypeParser: processed pointer/array, type built" << std::endl;
         return parsePrimary(it, end);
     }
 
 private:
     template<typename Iter>
     static TypeNode parsePrimary(Iter& it, Iter end) {
-        if (it == end) throwSyntaxError(Position(), "Expected type");
-
-        return std::visit(overloaded{
+        printToken(it, end, "TypeParser::parsePrimary");
+        if (it == end) throwSyntaxError(Util::Position(), "Expected type");
+        
+        return std::visit(Util::overloaded{
             [&](const Tokenization::Int&) -> TypeNode {
                 ++it; return IntType{};
             },
@@ -99,7 +109,7 @@ private:
                 if (it == end || !isToken<Tokenization::RightParenthesis>(it->token))
                     throwSyntaxError(currentPosition(it, end), "Expected ')'");
                 ++it;
-                return inner;
+                return std::move(inner);
             },
             [&](const Tokenization::Identifier& id) -> TypeNode {
                 // пользовательский тип (через typedef, но в C-lite нет typedef – используем как имена struct/enum)
@@ -115,11 +125,12 @@ private:
 public:
     template<typename Iter>
     static TypeNode parse(Iter& it, Iter end, bool allowPointer, bool allowArray) {
+        printToken(it, end, "TypeParser::parse(allow)");
         TypeNode type = parsePrimary(it, end);
         while (it != end) {
             if (allowPointer && isToken<Tokenization::Star>(it->token)) {
                 ++it;
-                type = PointerType{Boxed<TypeNode>(std::move(type))};
+                type = PointerType{Util::makeBoxed<TypeNode>(std::move(type))};
             }
             else if (allowArray && isToken<Tokenization::LeftBracket>(it->token)) {
                 ++it;
@@ -131,11 +142,11 @@ public:
                 if (it == end || !isToken<Tokenization::RightBracket>(it->token))
                     throwSyntaxError(currentPosition(it, end), "Expected ']'");
                 ++it;
-                type = ArrayType{Boxed<TypeNode>(std::move(type)), size};
+                type = ArrayType{Util::makeBoxed<TypeNode>(std::move(type)), size};
             }
             else break;
         }
-        return type;
+        return std::move(type);
     }
 };
 
@@ -150,9 +161,10 @@ public:
 private:
     template<typename Iter>
     static ExprNode parsePrimary(Iter& it, Iter end) {
-        if (it == end) throwSyntaxError(Position(), "Expected expression");
+        printToken(it, end, "ExprParser::parsePrimary");
+        if (it == end) throwSyntaxError(Util::Position(), "Expected expression");
 
-        return std::visit(overloaded{
+        return std::visit(Util::overloaded{
             [&](const Tokenization::IntLiteral& lit) -> ExprNode {
                 ++it; return IntLiteral{lit.value};
             },
@@ -177,11 +189,11 @@ private:
                 if (it == end || !isToken<Tokenization::RightParenthesis>(it->token))
                     throwSyntaxError(currentPosition(it, end), "Expected ')'");
                 ++it;
-                return expr;
+                return std::move(expr);
             },
             [&](const Tokenization::Sizeof&) -> ExprNode {
                 ++it;
-                if (it == end) throwSyntaxError(Position(), "Expected expression or type after sizeof");
+                if (it == end) throwSyntaxError(Util::Position(), "Expected expression or type after sizeof");
                 if (isToken<Tokenization::LeftParenthesis>(it->token)) {
                     // возможно тип в скобках
                     ++it;
@@ -189,39 +201,39 @@ private:
                     if (it == end || !isToken<Tokenization::RightParenthesis>(it->token))
                         throwSyntaxError(currentPosition(it, end), "Expected ')'");
                     ++it;
-                    return SizeofExpr{type};
+                    return SizeofExpr{std::move(type)};
                 } else {
                     ExprNode expr = parseUnary(it, end);
-                    return SizeofExpr{Boxed<ExprNode>(std::move(expr))};
+                    return SizeofExpr{Util::makeBoxed<ExprNode>(std::move(expr))};
                 }
             },
             [&](auto) -> ExprNode {
-                // унарные операторы обрабатываются на следующем уровне
-                return parseUnary(it, end);
+                throwSyntaxError(currentPosition(it, end), "Expected expression");
             }
         }, it->token);
     }
 
     template<typename Iter>
     static ExprNode parseUnary(Iter& it, Iter end) {
-        if (it == end) throwSyntaxError(Position(), "Expected unary expression");
+        printToken(it, end, "ExprParser::parseUnary");
+        if (it == end) throwSyntaxError(Util::Position(), "Expected unary expression");
 
         using enum UnaryOp::Op;
-        return std::visit(overloaded{
+        return std::visit(Util::overloaded{
             [&](const Tokenization::Not&) -> ExprNode {
-                ++it; return UnaryOp{Not, Boxed<ExprNode>(parseUnary(it, end))};
+                ++it; return UnaryOp{Not, Util::makeBoxed<ExprNode>(parseUnary(it, end))};
             },
             [&](const Tokenization::Minus&) -> ExprNode {
-                ++it; return UnaryOp{Minus, Boxed<ExprNode>(parseUnary(it, end))};
+                ++it; return UnaryOp{Minus, Util::makeBoxed<ExprNode>(parseUnary(it, end))};
             },
             [&](const Tokenization::Plus&) -> ExprNode {
-                ++it; return UnaryOp{Plus, Boxed<ExprNode>(parseUnary(it, end))};
+                ++it; return UnaryOp{Plus, Util::makeBoxed<ExprNode>(parseUnary(it, end))};
             },
             [&](const Tokenization::And&) -> ExprNode {   // &
-                ++it; return UnaryOp{AddressOf, Boxed<ExprNode>(parseUnary(it, end))};
+                ++it; return UnaryOp{AddressOf, Util::makeBoxed<ExprNode>(parseUnary(it, end))};
             },
             [&](const Tokenization::Star&) -> ExprNode {  // *
-                ++it; return UnaryOp{Dereference, Boxed<ExprNode>(parseUnary(it, end))};
+                ++it; return UnaryOp{Dereference, Util::makeBoxed<ExprNode>(parseUnary(it, end))};
             },
             [&](const Tokenization::Xor&) -> ExprNode {   // ^ (побитовое NOT в C? нет, ~)
                 // В C-lite ~ не определён, но можно добавить
@@ -235,22 +247,24 @@ private:
 
     template<typename Iter>
     static ExprNode parsePostfix(Iter& it, Iter end) {
+        printToken(it, end, "ExprParser::parsePostfix");
         ExprNode left = parsePrimary(it, end);
         while (it != end) {
             if (isToken<Tokenization::LeftBracket>(it->token)) {
+                std::cerr << "parsePostfix: processing '[' at " << it->position.toString() << std::endl;
                 ++it;
                 ExprNode index = parse(it, end);
                 if (it == end || !isToken<Tokenization::RightBracket>(it->token))
                     throwSyntaxError(currentPosition(it, end), "Expected ']'");
                 ++it;
-                left = IndexExpr{Boxed<ExprNode>(std::move(left)), Boxed<ExprNode>(std::move(index))};
+                left = IndexExpr{Util::makeBoxed<ExprNode>(std::move(left)), Util::makeBoxed<ExprNode>(std::move(index))};
             }
             else if (isToken<Tokenization::LeftParenthesis>(it->token)) {
                 ++it;
-                std::vector<Boxed<ExprNode>> args;
+                std::vector<Util::Boxed<ExprNode>> args;
                 if (!isToken<Tokenization::RightParenthesis>(it->token)) {
                     do {
-                        args.push_back(Boxed<ExprNode>(parse(it, end)));
+                        args.push_back(Util::makeBoxed<ExprNode>(parse(it, end)));
                         if (it != end && isToken<Tokenization::Comma>(it->token)) ++it;
                         else break;
                     } while (true);
@@ -258,7 +272,8 @@ private:
                 if (it == end || !isToken<Tokenization::RightParenthesis>(it->token))
                     throwSyntaxError(currentPosition(it, end), "Expected ')'");
                 ++it;
-                left = CallExpr{Boxed<ExprNode>(std::move(left)), std::move(args)};
+                std::cerr << "parsePostfix: after call, token = " << (it != end ? it->token : Tokenization::TokenVariant{}) << std::endl;
+                left = CallExpr{Util::makeBoxed<ExprNode>(std::move(left)), std::move(args)};
             }
             else if (isToken<Tokenization::Dot>(it->token)) {
                 ++it;
@@ -266,7 +281,7 @@ private:
                     throwSyntaxError(currentPosition(it, end), "Expected field name");
                 std::string field = std::get<Tokenization::Identifier>(it->token).name;
                 ++it;
-                left = FieldAccessExpr{Boxed<ExprNode>(std::move(left)), field, false};
+                left = FieldAccessExpr{Util::makeBoxed<ExprNode>(std::move(left)), field, false};
             }
             else if (isToken<Tokenization::Arrow>(it->token)) {
                 ++it;
@@ -274,68 +289,71 @@ private:
                     throwSyntaxError(currentPosition(it, end), "Expected field name");
                 std::string field = std::get<Tokenization::Identifier>(it->token).name;
                 ++it;
-                left = FieldAccessExpr{Boxed<ExprNode>(std::move(left)), field, true};
+                left = FieldAccessExpr{Util::makeBoxed<ExprNode>(std::move(left)), field, true};
             }
             else break;
         }
-        return left;
+        return std::move(left);
     }
 
     // Бинарные операторы (обобщённая функция)
-    template<typename Iter, typename NextParser, typename... OpTokens>
-    static ExprNode parseBinary(Iter& it, Iter end, NextParser&& nextParser, const std::vector<std::pair<decltype(OpTokens{}), BinaryOp::Op>>& ops) {
+    template<typename Iter, typename NextParser>
+    static ExprNode parseBinary(Iter& it, Iter end, NextParser&& nextParser, const std::vector<std::pair<Tokenization::TokenVariant, BinaryOp::Op>>& ops) {
+        printToken(it, end, "ExprParser::parseBinary");
         ExprNode left = nextParser(it, end);
         while (it != end) {
             bool matched = false;
             BinaryOp::Op op;
-            for (const auto& [tok, opVal] : ops) {
-                if (std::holds_alternative<decltype(tok)>(it->token)) {
-                    ++it;
-                    op = opVal;
+            for (const auto& [tokType, opVal] : ops) {
+                if (it->token == tokType) {
                     matched = true;
+                    op = opVal;
+                    ++it;
                     break;
                 }
             }
             if (!matched) break;
             ExprNode right = nextParser(it, end);
-            left = BinaryOp{op, Boxed<ExprNode>(std::move(left)), Boxed<ExprNode>(std::move(right))};
+            left = BinaryOp{op, Util::makeBoxed<ExprNode>(std::move(left)), Util::makeBoxed<ExprNode>(std::move(right))};
         }
-        return left;
+        return std::move(left);
     }
 
 public:
     template<typename Iter>
     static ExprNode parseAssignment(Iter& it, Iter end) {
-        // Попытка распознать множественное присваивание: левая часть – список lvalue через запятую
-        // Сохраняем позицию, пробуем прочитать список идентификаторов до '='
+        printToken(it, end, "ExprParser::parseAssignment");
         auto saved = it;
-        std::vector<Boxed<ExprNode>> lefts;
+        std::vector<Util::Boxed<ExprNode>> lefts;
+        bool isMultiAssign = false;
         try {
-            // Парсим левые части: они должны быть lvalue (переменные, разыменования, поля, индексы)
+            // Парсим левые части (список lvalue через запятую)
             while (true) {
-                // lvalue – это postfix-expression (идентификатор, разыменование, доступ)
                 ExprNode lval = parsePostfix(it, end);
-                // Проверяем, что это lvalue (упрощённо: любые postfix, но семантика потом)
-                lefts.push_back(Boxed<ExprNode>(std::move(lval)));
+                lefts.push_back(Util::makeBoxed<ExprNode>(std::move(lval)));
                 if (it == end || !isToken<Tokenization::Comma>(it->token)) break;
                 ++it;
             }
+            // Если следующий токен '=', то это множественное присваивание
             if (it != end && isToken<Tokenization::Assign>(it->token)) {
+                isMultiAssign = true;
                 ++it; // пропускаем '='
-                // Парсим правые выражения
-                std::vector<Boxed<ExprNode>> rights;
+                std::vector<Util::Boxed<ExprNode>> rights;
                 while (true) {
-                    rights.push_back(Boxed<ExprNode>(parseAssignment(it, end)));
+                    rights.push_back(Util::makeBoxed<ExprNode>(parseAssignment(it, end)));
                     if (it == end || !isToken<Tokenization::Comma>(it->token)) break;
                     ++it;
                 }
-                if (lefts.size() != rights.size()) {
-                    throwSyntaxError(currentPosition(it, end), "Number of left and right values in multi-assign mismatch");
-                }
+
+                std::cerr << "parseAssignment: returning MultiAssignExpr, token now = " << (it != end ? it->token : Tokenization::TokenVariant{}) << std::endl;
                 return MultiAssignExpr{std::move(lefts), std::move(rights)};
             }
         } catch (...) {
-            // не удалось распарсить множественное присваивание – откатываемся
+            // При любой ошибке откатываемся
+            it = saved;
+        }
+        // Если множественное присваивание не удалось, откатываем итератор
+        if (!isMultiAssign) {
             it = saved;
         }
         // Обычное присваивание или составное
@@ -345,13 +363,13 @@ public:
             if (isToken<Tokenization::Assign>(it->token)) {
                 ++it;
                 ExprNode right = parseAssignment(it, end);
-                return AssignExpr{Boxed<ExprNode>(std::move(left)), Boxed<ExprNode>(std::move(right)), AssignExpr::Op::Assign};
+                return AssignExpr{Util::makeBoxed<ExprNode>(std::move(left)), Util::makeBoxed<ExprNode>(std::move(right)), AssignExpr::Op::Assign};
             }
             // Составные присваивания
             #define COMPOUND_ASSIGN(op_token, op_enum) \
             if (isToken<Tokenization::op_token>(it->token)) { \
                 ++it; ExprNode right = parseAssignment(it, end); \
-                return AssignExpr{Boxed<ExprNode>(std::move(left)), Boxed<ExprNode>(std::move(right)), AssignExpr::Op::op_enum}; \
+                return AssignExpr{Util::makeBoxed<ExprNode>(std::move(left)), Util::makeBoxed<ExprNode>(std::move(right)), AssignExpr::Op::op_enum}; \
             }
             COMPOUND_ASSIGN(PlusAssign, AddAssign)
             COMPOUND_ASSIGN(MinusAssign, SubAssign)
@@ -365,11 +383,12 @@ public:
             COMPOUND_ASSIGN(OrAssign, OrAssign)
             #undef COMPOUND_ASSIGN
         }
-        return left;
+        return std::move(left);
     }
 
     template<typename Iter>
     static ExprNode parseConditional(Iter& it, Iter end) {
+        printToken(it, end, "ExprParser::parseConditional");
         ExprNode cond = parseLogicalOr(it, end);
         if (it != end && isToken<Tokenization::Question>(it->token)) {
             ++it;
@@ -378,106 +397,95 @@ public:
                 throwSyntaxError(currentPosition(it, end), "Expected ':'");
             ++it;
             ExprNode elseExpr = parseAssignment(it, end);
-            return ConditionalExpr{Boxed<ExprNode>(std::move(cond)),
-                                   Boxed<ExprNode>(std::move(thenExpr)),
-                                   Boxed<ExprNode>(std::move(elseExpr))};
+            return ConditionalExpr{Util::makeBoxed<ExprNode>(std::move(cond)),
+                                   Util::makeBoxed<ExprNode>(std::move(thenExpr)),
+                                   Util::makeBoxed<ExprNode>(std::move(elseExpr))};
         }
-        return cond;
+        return std::move(cond);
     }
 
     // Уровни приоритета (следуя стандарту C)
     template<typename Iter>
     static ExprNode parseLogicalOr(Iter& it, Iter end) {
-        static const std::vector<std::pair<Tokenization::OrOr, BinaryOp::Op>> ops = {{Tokenization::OrOr{}, BinaryOp::Op::LogicalOr}};
-        return parseBinary(it, end, parseLogicalAnd, ops);
+        static const std::vector<std::pair<Tokenization::TokenVariant, BinaryOp::Op>> ops = {{Tokenization::TokenVariant{Tokenization::OrOr{}}, BinaryOp::Op::LogicalOr}};
+        auto next = [&](Iter& i, Iter e) -> ExprNode { return parseLogicalAnd(i, e); };
+        return parseBinary(it, end, next, ops);
     }
     template<typename Iter>
     static ExprNode parseLogicalAnd(Iter& it, Iter end) {
-        static const std::vector<std::pair<Tokenization::AndAnd, BinaryOp::Op>> ops = {{Tokenization::AndAnd{}, BinaryOp::Op::LogicalAnd}};
-        return parseBinary(it, end, parseBitOr, ops);
+        static const std::vector<std::pair<Tokenization::TokenVariant, BinaryOp::Op>> ops = {{Tokenization::TokenVariant{Tokenization::AndAnd{}}, BinaryOp::Op::LogicalAnd}};
+        auto next = [&](Iter& i, Iter e) -> ExprNode { return parseBitOr(i, e); };
+        return parseBinary(it, end, next, ops);
     }
     template<typename Iter>
     static ExprNode parseBitOr(Iter& it, Iter end) {
-        static const std::vector<std::pair<Tokenization::Or, BinaryOp::Op>> ops = {{Tokenization::Or{}, BinaryOp::Op::BitOr}};
-        return parseBinary(it, end, parseBitXor, ops);
+        static const std::vector<std::pair<Tokenization::TokenVariant, BinaryOp::Op>> ops = {{Tokenization::TokenVariant{Tokenization::Or{}}, BinaryOp::Op::BitOr}};
+        auto next = [&](Iter& i, Iter e) -> ExprNode { return parseBitXor(i, e); };
+        return parseBinary(it, end, next, ops);
     }
     template<typename Iter>
     static ExprNode parseBitXor(Iter& it, Iter end) {
-        static const std::vector<std::pair<Tokenization::Xor, BinaryOp::Op>> ops = {{Tokenization::Xor{}, BinaryOp::Op::BitXor}};
-        return parseBinary(it, end, parseBitAnd, ops);
+        static const std::vector<std::pair<Tokenization::TokenVariant, BinaryOp::Op>> ops = {{Tokenization::TokenVariant{Tokenization::Xor{}}, BinaryOp::Op::BitXor}};
+        auto next = [&](Iter& i, Iter e) -> ExprNode { return parseBitAnd(i, e); };
+        return parseBinary(it, end, next, ops);
     }
     template<typename Iter>
     static ExprNode parseBitAnd(Iter& it, Iter end) {
-        static const std::vector<std::pair<Tokenization::And, BinaryOp::Op>> ops = {{Tokenization::And{}, BinaryOp::Op::BitAnd}};
-        return parseBinary(it, end, parseEquality, ops);
+        static const std::vector<std::pair<Tokenization::TokenVariant, BinaryOp::Op>> ops = {{Tokenization::TokenVariant{Tokenization::And{}}, BinaryOp::Op::BitAnd}};
+        auto next = [&](Iter& i, Iter e) -> ExprNode { return parseEquality(i, e); };
+        return parseBinary(it, end, next, ops);
     }
     template<typename Iter>
     static ExprNode parseEquality(Iter& it, Iter end) {
-        static const std::vector<std::pair<Tokenization::Equal, BinaryOp::Op>> eq = {{Tokenization::Equal{}, BinaryOp::Op::Equal}};
-        static const std::vector<std::pair<Tokenization::NotEqual, BinaryOp::Op>> ne = {{Tokenization::NotEqual{}, BinaryOp::Op::NotEqual}};
-        auto left = parseRelational(it, end);
-        while (it != end) {
-            if (isToken<Tokenization::Equal>(it->token)) {
-                ++it; left = BinaryOp{BinaryOp::Op::Equal, Boxed<ExprNode>(std::move(left)), Boxed<ExprNode>(parseRelational(it, end))};
-            } else if (isToken<Tokenization::NotEqual>(it->token)) {
-                ++it; left = BinaryOp{BinaryOp::Op::NotEqual, Boxed<ExprNode>(std::move(left)), Boxed<ExprNode>(parseRelational(it, end))};
-            } else break;
-        }
-        return left;
+        static const std::vector<std::pair<Tokenization::TokenVariant, BinaryOp::Op>> ops = {
+            {Tokenization::TokenVariant{Tokenization::Equal{}}, BinaryOp::Op::Equal},
+            {Tokenization::TokenVariant{Tokenization::NotEqual{}}, BinaryOp::Op::NotEqual}
+        };
+        auto next = [&](Iter& i, Iter e) -> ExprNode { return parseRelational(i, e); };
+        return parseBinary(it, end, next, ops);
     }
+
     template<typename Iter>
     static ExprNode parseRelational(Iter& it, Iter end) {
-        auto left = parseShift(it, end);
-        while (it != end) {
-            if (isToken<Tokenization::Less>(it->token)) {
-                ++it; left = BinaryOp{BinaryOp::Op::Less, Boxed<ExprNode>(std::move(left)), Boxed<ExprNode>(parseShift(it, end))};
-            } else if (isToken<Tokenization::LessEqual>(it->token)) {
-                ++it; left = BinaryOp{BinaryOp::Op::LessEqual, Boxed<ExprNode>(std::move(left)), Boxed<ExprNode>(parseShift(it, end))};
-            } else if (isToken<Tokenization::Greater>(it->token)) {
-                ++it; left = BinaryOp{BinaryOp::Op::Greater, Boxed<ExprNode>(std::move(left)), Boxed<ExprNode>(parseShift(it, end))};
-            } else if (isToken<Tokenization::GreaterEqual>(it->token)) {
-                ++it; left = BinaryOp{BinaryOp::Op::GreaterEqual, Boxed<ExprNode>(std::move(left)), Boxed<ExprNode>(parseShift(it, end))};
-            } else break;
-        }
-        return left;
+        static const std::vector<std::pair<Tokenization::TokenVariant, BinaryOp::Op>> ops = {
+            {Tokenization::TokenVariant{Tokenization::Less{}}, BinaryOp::Op::Less},
+            {Tokenization::TokenVariant{Tokenization::LessEqual{}}, BinaryOp::Op::LessEqual},
+            {Tokenization::TokenVariant{Tokenization::Greater{}}, BinaryOp::Op::Greater},
+            {Tokenization::TokenVariant{Tokenization::GreaterEqual{}}, BinaryOp::Op::GreaterEqual}
+        };
+        auto next = [&](Iter& i, Iter e) -> ExprNode { return parseShift(i, e); };
+        return parseBinary(it, end, next, ops);
     }
+
     template<typename Iter>
     static ExprNode parseShift(Iter& it, Iter end) {
-        auto left = parseAdditive(it, end);
-        while (it != end) {
-            if (isToken<Tokenization::ShiftLeft>(it->token)) {
-                ++it; left = BinaryOp{BinaryOp::Op::ShiftLeft, Boxed<ExprNode>(std::move(left)), Boxed<ExprNode>(parseAdditive(it, end))};
-            } else if (isToken<Tokenization::ShiftRight>(it->token)) {
-                ++it; left = BinaryOp{BinaryOp::Op::ShiftRight, Boxed<ExprNode>(std::move(left)), Boxed<ExprNode>(parseAdditive(it, end))};
-            } else break;
-        }
-        return left;
+        static const std::vector<std::pair<Tokenization::TokenVariant, BinaryOp::Op>> ops = {
+            {Tokenization::TokenVariant{Tokenization::ShiftLeft{}}, BinaryOp::Op::ShiftLeft},
+            {Tokenization::TokenVariant{Tokenization::ShiftRight{}}, BinaryOp::Op::ShiftRight}
+        };
+        auto next = [&](Iter& i, Iter e) -> ExprNode { return parseAdditive(i, e); };
+        return parseBinary(it, end, next, ops);
     }
+
     template<typename Iter>
     static ExprNode parseAdditive(Iter& it, Iter end) {
-        auto left = parseMultiplicative(it, end);
-        while (it != end) {
-            if (isToken<Tokenization::Plus>(it->token)) {
-                ++it; left = BinaryOp{BinaryOp::Op::Add, Boxed<ExprNode>(std::move(left)), Boxed<ExprNode>(parseMultiplicative(it, end))};
-            } else if (isToken<Tokenization::Minus>(it->token)) {
-                ++it; left = BinaryOp{BinaryOp::Op::Sub, Boxed<ExprNode>(std::move(left)), Boxed<ExprNode>(parseMultiplicative(it, end))};
-            } else break;
-        }
-        return left;
+        static const std::vector<std::pair<Tokenization::TokenVariant, BinaryOp::Op>> ops = {
+            {Tokenization::TokenVariant{Tokenization::Plus{}}, BinaryOp::Op::Add},
+            {Tokenization::TokenVariant{Tokenization::Minus{}}, BinaryOp::Op::Sub}
+        };
+        auto next = [&](Iter& i, Iter e) -> ExprNode { return parseMultiplicative(i, e); };
+        return parseBinary(it, end, next, ops);
     }
+
     template<typename Iter>
     static ExprNode parseMultiplicative(Iter& it, Iter end) {
-        auto left = parseUnary(it, end);
-        while (it != end) {
-            if (isToken<Tokenization::Star>(it->token)) {
-                ++it; left = BinaryOp{BinaryOp::Op::Mul, Boxed<ExprNode>(std::move(left)), Boxed<ExprNode>(parseUnary(it, end))};
-            } else if (isToken<Tokenization::Slash>(it->token)) {
-                ++it; left = BinaryOp{BinaryOp::Op::Div, Boxed<ExprNode>(std::move(left)), Boxed<ExprNode>(parseUnary(it, end))};
-            } else if (isToken<Tokenization::Percent>(it->token)) {
-                ++it; left = BinaryOp{BinaryOp::Op::Rem, Boxed<ExprNode>(std::move(left)), Boxed<ExprNode>(parseUnary(it, end))};
-            } else break;
-        }
-        return left;
+        static const std::vector<std::pair<Tokenization::TokenVariant, BinaryOp::Op>> ops = {
+            {Tokenization::TokenVariant{Tokenization::Star{}}, BinaryOp::Op::Mul},
+            {Tokenization::TokenVariant{Tokenization::Slash{}}, BinaryOp::Op::Div},
+            {Tokenization::TokenVariant{Tokenization::Percent{}}, BinaryOp::Op::Rem}
+        };
+        auto next = [&](Iter& i, Iter e) -> ExprNode { return parseUnary(i, e); };
+        return parseBinary(it, end, next, ops);
     }
 };
 
@@ -491,24 +499,30 @@ public:
 
     template<typename Iter>
     static BlockStmt parseBlock(Iter& it, Iter end) {
+        printToken(it, end, "StmtParser::parseBlock");
+        std::cerr << "parseBlock: entered" << std::endl;
+        
         if (it == end || !isToken<Tokenization::LeftBrace>(it->token))
             throwSyntaxError(currentPosition(it, end), "Expected '{'");
         ++it;
-        std::vector<Boxed<StmtNode>> stmts;
+        std::vector<Util::Boxed<StmtNode>> stmts;
         while (it != end && !isToken<Tokenization::RightBrace>(it->token)) {
-            stmts.push_back(Boxed<StmtNode>(parseStatement(it, end)));
+            stmts.push_back(Util::makeBoxed<StmtNode>(parseStatement(it, end)));
         }
-        if (it == end) throwSyntaxError(Position(), "Expected '}'");
+        if (it == end) throwSyntaxError(Util::Position(), "Expected '}'");
         ++it;
+        
+        std::cerr << "parseBlock: returning" << std::endl;
         return BlockStmt{std::move(stmts)};
     }
 
 private:
     template<typename Iter>
     static StmtNode parseStatement(Iter& it, Iter end) {
-        if (it == end) throwSyntaxError(Position(), "Expected statement");
+        printToken(it, end, "StmtParser::parseStatement");
+        if (it == end) throwSyntaxError(Util::Position(), "Expected statement");
 
-        return std::visit(overloaded{
+        return std::visit(Util::overloaded{
             [&](const Tokenization::If&) -> StmtNode {
                 ++it;
                 if (it == end || !isToken<Tokenization::LeftParenthesis>(it->token))
@@ -519,13 +533,13 @@ private:
                     throwSyntaxError(currentPosition(it, end), "Expected ')'");
                 ++it;
                 StmtNode thenStmt = parseStatement(it, end);
-                std::optional<Boxed<StmtNode>> elseStmt;
+                std::optional<Util::Boxed<StmtNode>> elseStmt;
                 if (it != end && isToken<Tokenization::Else>(it->token)) {
                     ++it;
-                    elseStmt = Boxed<StmtNode>(parseStatement(it, end));
+                    elseStmt = Util::makeBoxed<StmtNode>(parseStatement(it, end));
                 }
-                return IfStmt{Boxed<ExprNode>(std::move(cond)),
-                             Boxed<StmtNode>(std::move(thenStmt)),
+                return IfStmt{Util::makeBoxed<ExprNode>(std::move(cond)),
+                             Util::makeBoxed<StmtNode>(std::move(thenStmt)),
                              elseStmt ? std::optional(std::move(elseStmt)) : std::nullopt};
             },
             [&](const Tokenization::While&) -> StmtNode {
@@ -538,7 +552,7 @@ private:
                     throwSyntaxError(currentPosition(it, end), "Expected ')'");
                 ++it;
                 StmtNode body = parseStatement(it, end);
-                return WhileStmt{Boxed<ExprNode>(std::move(cond)), Boxed<StmtNode>(std::move(body))};
+                return WhileStmt{Util::makeBoxed<ExprNode>(std::move(cond)), Util::makeBoxed<StmtNode>(std::move(body))};
             },
             [&](const Tokenization::Do&) -> StmtNode {
                 ++it;
@@ -556,14 +570,14 @@ private:
                 if (it == end || !isToken<Tokenization::Semicolon>(it->token))
                     throwSyntaxError(currentPosition(it, end), "Expected ';' after do-while");
                 ++it;
-                return DoWhileStmt{Boxed<StmtNode>(std::move(body)), Boxed<ExprNode>(std::move(cond))};
+                return DoWhileStmt{Util::makeBoxed<StmtNode>(std::move(body)), Util::makeBoxed<ExprNode>(std::move(cond))};
             },
             [&](const Tokenization::For&) -> StmtNode {
                 ++it;
                 if (it == end || !isToken<Tokenization::LeftParenthesis>(it->token))
                     throwSyntaxError(currentPosition(it, end), "Expected '(' after for");
                 ++it;
-                std::optional<Boxed<StmtNode>> init;
+                std::optional<Util::Boxed<StmtNode>> init;
                 if (!isToken<Tokenization::Semicolon>(it->token)) {
                     // может быть объявление переменной или выражение
                     // пробуем объявление
@@ -577,37 +591,37 @@ private:
                             throwSyntaxError(currentPosition(it, end), "Expected variable name");
                         std::string name = std::get<Tokenization::Identifier>(it->token).name;
                         ++it;
-                        std::optional<Boxed<ExprNode>> initializer;
+                        std::optional<Util::Boxed<ExprNode>> initializer;
                         if (it != end && isToken<Tokenization::Assign>(it->token)) {
                             ++it;
-                            initializer = Boxed<ExprNode>(ExprParser::parse(it, end));
+                            initializer = Util::makeBoxed<ExprNode>(ExprParser::parse(it, end));
                         }
-                        init = Boxed<StmtNode>(VarDeclStmt{std::move(type), name, initializer});
+                        init = Util::makeBoxed<StmtNode>(VarDeclStmt{std::move(type), name, std::move(initializer)});
                     } else {
                         // выражение
                         ExprNode expr = ExprParser::parse(it, end);
-                        init = Boxed<StmtNode>(ExprStmt{Boxed<ExprNode>(std::move(expr))});
+                        init = Util::makeBoxed<StmtNode>(ExprStmt{Util::makeBoxed<ExprNode>(std::move(expr))});
                     }
                 }
                 if (it == end || !isToken<Tokenization::Semicolon>(it->token))
                     throwSyntaxError(currentPosition(it, end), "Expected ';' after for init");
                 ++it;
-                std::optional<Boxed<ExprNode>> condition;
+                std::optional<Util::Boxed<ExprNode>> condition;
                 if (!isToken<Tokenization::Semicolon>(it->token)) {
-                    condition = Boxed<ExprNode>(ExprParser::parse(it, end));
+                    condition = Util::makeBoxed<ExprNode>(ExprParser::parse(it, end));
                 }
                 if (it == end || !isToken<Tokenization::Semicolon>(it->token))
                     throwSyntaxError(currentPosition(it, end), "Expected ';' after for condition");
                 ++it;
-                std::optional<Boxed<ExprNode>> increment;
+                std::optional<Util::Boxed<ExprNode>> increment;
                 if (!isToken<Tokenization::RightParenthesis>(it->token)) {
-                    increment = Boxed<ExprNode>(ExprParser::parse(it, end));
+                    increment = Util::makeBoxed<ExprNode>(ExprParser::parse(it, end));
                 }
                 if (it == end || !isToken<Tokenization::RightParenthesis>(it->token))
                     throwSyntaxError(currentPosition(it, end), "Expected ')' after for clauses");
                 ++it;
                 StmtNode body = parseStatement(it, end);
-                return ForStmt{init, condition, increment, Boxed<StmtNode>(std::move(body))};
+                return ForStmt{std::move(init), std::move(condition), std::move(increment), Util::makeBoxed<StmtNode>(std::move(body))};
             },
             [&](const Tokenization::Switch&) -> StmtNode {
                 ++it;
@@ -619,7 +633,7 @@ private:
                     throwSyntaxError(currentPosition(it, end), "Expected ')'");
                 ++it;
                 StmtNode body = parseStatement(it, end);
-                return SwitchStmt{Boxed<ExprNode>(std::move(control)), Boxed<StmtNode>(std::move(body))};
+                return SwitchStmt{Util::makeBoxed<ExprNode>(std::move(control)), Util::makeBoxed<StmtNode>(std::move(body))};
             },
             [&](const Tokenization::Case&) -> StmtNode {
                 // отдельно не парсится, обрабатывается внутри блока switch – упрощённо
@@ -644,10 +658,10 @@ private:
             },
             [&](const Tokenization::Return&) -> StmtNode {
                 ++it;
-                std::vector<Boxed<ExprNode>> values;
+                std::vector<Util::Boxed<ExprNode>> values;
                 if (it != end && !isToken<Tokenization::Semicolon>(it->token)) {
                     do {
-                        values.push_back(Boxed<ExprNode>(ExprParser::parse(it, end)));
+                        values.push_back(Util::makeBoxed<ExprNode>(ExprParser::parse(it, end)));
                         if (it != end && isToken<Tokenization::Comma>(it->token)) ++it;
                         else break;
                     } while (true);
@@ -675,18 +689,77 @@ private:
                 if (it != end && isToken<Tokenization::Colon>(it->token)) {
                     ++it;
                     StmtNode stmt = parseStatement(it, end);
-                    return LabelStmt{id.name, Boxed<StmtNode>(std::move(stmt))};
+                    return LabelStmt{id.name, Util::makeBoxed<StmtNode>(std::move(stmt))};
                 }
                 it = saved;
                 ExprNode expr = ExprParser::parse(it, end);
+                std::cerr << "parseStatement: after parse, token = " << (it != end ? it->token : Tokenization::TokenVariant{}) << std::endl;
                 if (it == end || !isToken<Tokenization::Semicolon>(it->token))
                     throwSyntaxError(currentPosition(it, end), "Expected ';' after expression statement");
                 ++it;
-                return ExprStmt{Boxed<ExprNode>(std::move(expr))};
+                return ExprStmt{Util::makeBoxed<ExprNode>(std::move(expr))};
             },
             [&](const Tokenization::LeftBrace&) -> StmtNode {
                 BlockStmt block = parseBlock(it, end);
-                return block;
+                return std::move(block);
+            },
+            [&](const Tokenization::Struct&) -> StmtNode {
+                ++it; // пропускаем 'struct'
+                if (it == end || !isToken<Tokenization::Identifier>(it->token))
+                    throwSyntaxError(currentPosition(it, end), "Expected struct name");
+                std::string structName = std::get<Tokenization::Identifier>(it->token).name;
+                ++it;
+                TypeNode type = NamedType{structName};
+                if (it == end || !isToken<Tokenization::Identifier>(it->token))
+                    throwSyntaxError(currentPosition(it, end), "Expected variable name");
+                std::string varName = std::get<Tokenization::Identifier>(it->token).name;
+                ++it;
+                std::optional<Util::Boxed<ExprNode>> initializer;
+                if (it != end && isToken<Tokenization::Assign>(it->token)) {
+                    ++it;
+                    if (isToken<Tokenization::LeftBrace>(it->token)) {
+                        // Составной инициализатор: { expr, expr, ... }
+                        ++it;
+                        std::vector<Util::Boxed<ExprNode>> initValues;
+                        while (it != end && !isToken<Tokenization::RightBrace>(it->token)) {
+                            initValues.push_back(Util::makeBoxed<ExprNode>(ExprParser::parse(it, end)));
+                            if (it != end && isToken<Tokenization::Comma>(it->token)) ++it;
+                            else break;
+                        }
+                        if (it == end || !isToken<Tokenization::RightBrace>(it->token))
+                            throwSyntaxError(currentPosition(it, end), "Expected '}' after initializer list");
+                        ++it;
+                        initializer = Util::makeBoxed<ExprNode>(InitListExpr{std::move(initValues)});
+                    } else {
+                        initializer = Util::makeBoxed<ExprNode>(ExprParser::parse(it, end));
+                    }
+                }
+                if (it == end || !isToken<Tokenization::Semicolon>(it->token))
+                    throwSyntaxError(currentPosition(it, end), "Expected ';' after variable declaration");
+                ++it;
+                return VarDeclStmt{std::move(type), varName, std::move(initializer)};
+            },
+            [&](const Tokenization::Enum&) -> StmtNode {
+                ++it; // пропускаем 'enum'
+                if (it == end || !isToken<Tokenization::Identifier>(it->token))
+                    throwSyntaxError(currentPosition(it, end), "Expected enum name");
+                std::string enumName = std::get<Tokenization::Identifier>(it->token).name;
+                ++it;
+                TypeNode type = NamedType{enumName};
+                if (it == end || !isToken<Tokenization::Identifier>(it->token))
+                    throwSyntaxError(currentPosition(it, end), "Expected variable name");
+                std::string varName = std::get<Tokenization::Identifier>(it->token).name;
+                ++it;
+                std::optional<Util::Boxed<ExprNode>> initializer;
+                if (it != end && isToken<Tokenization::Assign>(it->token)) {
+                    ++it;
+                    // Для enum инициализатор – просто выражение (например, GREEN)
+                    initializer = Util::makeBoxed<ExprNode>(ExprParser::parse(it, end));
+                }
+                if (it == end || !isToken<Tokenization::Semicolon>(it->token))
+                    throwSyntaxError(currentPosition(it, end), "Expected ';' after variable declaration");
+                ++it;
+                return VarDeclStmt{std::move(type), varName, std::move(initializer)};
             },
             [&](auto) -> StmtNode {
                 // объявление переменной в блоке (не for)
@@ -695,15 +768,28 @@ private:
                     throwSyntaxError(currentPosition(it, end), "Expected variable name");
                 std::string name = std::get<Tokenization::Identifier>(it->token).name;
                 ++it;
-                std::optional<Boxed<ExprNode>> initializer;
+                std::optional<Util::Boxed<ExprNode>> initializer;
                 if (it != end && isToken<Tokenization::Assign>(it->token)) {
                     ++it;
-                    initializer = Boxed<ExprNode>(ExprParser::parse(it, end));
+                    if (isToken<Tokenization::LeftBrace>(it->token)) {
+                        ++it;
+                        std::vector<Util::Boxed<ExprNode>> initValues;
+                        while (it != end && !isToken<Tokenization::RightBrace>(it->token)) {
+                            initValues.push_back(Util::makeBoxed<ExprNode>(ExprParser::parse(it, end)));
+                            if (it != end && isToken<Tokenization::Comma>(it->token)) ++it;
+                        }
+                        if (it == end || !isToken<Tokenization::RightBrace>(it->token))
+                            throwSyntaxError(currentPosition(it, end), "Expected '}'");
+                        ++it;
+                        initializer = Util::makeBoxed<ExprNode>(InitListExpr{std::move(initValues)});
+                    } else {
+                        initializer = Util::makeBoxed<ExprNode>(ExprParser::parse(it, end));
+                    }
                 }
                 if (it == end || !isToken<Tokenization::Semicolon>(it->token))
                     throwSyntaxError(currentPosition(it, end), "Expected ';' after variable declaration");
                 ++it;
-                return VarDeclStmt{std::move(type), name, initializer};
+                return VarDeclStmt{std::move(type), name, std::move(initializer)};
             }
         }, it->token);
     }
@@ -714,9 +800,11 @@ class DefParser {
 public:
     template<typename Iter>
     static DefNode parse(Iter& it, Iter end) {
-        if (it == end) throwSyntaxError(Position(), "Expected definition");
+        printToken(it, end, "DefParser::parse");
+        if (it == end) throwSyntaxError(Util::Position(), "Expected definition");
 
-        return std::visit(overloaded{
+        std::cerr << "DefParser::parse: parsing definition at token: "  << std::endl;
+        return std::visit(Util::overloaded{
             [&](const Tokenization::Int&) -> DefNode {
                 return parseFunctionOrGlobal(it, end, IntType{});
             },
@@ -755,9 +843,12 @@ public:
                     else throwSyntaxError(currentPosition(it, end), "Expected ';' after field");
                     fields.emplace_back(fname, std::move(fieldType));
                 }
-                if (it == end) throwSyntaxError(Position(), "Expected '}'");
+                if (it == end) throwSyntaxError(Util::Position(), "Expected '}'");
                 ++it;
-                return StructDef{name, std::move(fields)};
+                if (it == end || !isToken<Tokenization::Semicolon>(it->token))
+                    throwSyntaxError(currentPosition(it, end), "Expected ';' after enum definition");
+                ++it; // пропускаем ';'
+                return StructDef{std::move(name), std::move(fields)};
             },
             [&](const Tokenization::Enum&) -> DefNode {
                 ++it;
@@ -786,9 +877,12 @@ public:
                     if (it != end && isToken<Tokenization::Comma>(it->token)) ++it;
                     else break;
                 }
-                if (it == end) throwSyntaxError(Position(), "Expected '}'");
+                if (it == end) throwSyntaxError(Util::Position(), "Expected '}'");
                 ++it;
-                return EnumDef{name, std::move(enumerators)};
+                if (it == end || !isToken<Tokenization::Semicolon>(it->token))
+                    throwSyntaxError(currentPosition(it, end), "Expected ';' after enum definition");
+                ++it; // пропускаем ';'
+                return EnumDef{std::move(name), std::move(enumerators)};
             },
             [&](auto) -> DefNode {
                 throwSyntaxError(it->position, "Expected function, global variable, struct or enum definition");
@@ -799,16 +893,32 @@ public:
 private:
     template<typename Iter, typename BaseType>
     static DefNode parseFunctionOrGlobal(Iter& it, Iter end, BaseType baseType) {
-        // Парсим полный тип (указатели, массивы)
-        TypeNode type = TypeParser::parse(it, end, true, true);
+        // Сначала читаем первый тип (может быть со звёздочками и скобками)
+        TypeNode firstType = TypeParser::parse(it, end, true, true);
+        std::vector<TypeNode> returnTypes;
+        returnTypes.push_back(std::move(firstType));
+
+        // Если после первого типа идёт запятая — значит, это список возвращаемых типов (только для функции)
+        if (it != end && isToken<Tokenization::Comma>(it->token)) {
+            ++it; // пропускаем ','
+            do {
+                TypeNode nextType = TypeParser::parse(it, end, true, true);
+                returnTypes.push_back(std::move(nextType));
+                if (it == end || !isToken<Tokenization::Comma>(it->token)) break;
+                ++it;
+            } while (true);
+        }
+
+        // Теперь должно быть имя (идентификатор)
         if (it == end || !isToken<Tokenization::Identifier>(it->token))
             throwSyntaxError(currentPosition(it, end), "Expected function or variable name");
         std::string name = std::get<Tokenization::Identifier>(it->token).name;
         ++it;
+
         // Если следующий токен '(', то это функция
         if (it != end && isToken<Tokenization::LeftParenthesis>(it->token)) {
-            // Функция
-            ++it;
+            // === Функция ===
+            ++it; // '('
             std::vector<Param> params;
             bool variadic = false;
             if (!isToken<Tokenization::RightParenthesis>(it->token)) {
@@ -832,41 +942,24 @@ private:
             if (it == end || !isToken<Tokenization::RightParenthesis>(it->token))
                 throwSyntaxError(currentPosition(it, end), "Expected ')' after parameters");
             ++it;
-            // Возвращаемые типы (множественные)
-            std::vector<TypeNode> returnTypes;
-            if (it != end && isToken<Tokenization::Colon>(it->token)) {
-                ++it;
-                // может быть кортеж или одиночный тип
-                if (isToken<Tokenization::LeftParenthesis>(it->token)) {
-                    ++it;
-                    do {
-                        returnTypes.push_back(TypeParser::parse(it, end, true, true));
-                        if (it != end && isToken<Tokenization::Comma>(it->token)) ++it;
-                        else break;
-                    } while (true);
-                    if (it == end || !isToken<Tokenization::RightParenthesis>(it->token))
-                        throwSyntaxError(currentPosition(it, end), "Expected ')' after multiple return types");
-                    ++it;
-                } else {
-                    returnTypes.push_back(TypeParser::parse(it, end, true, true));
-                }
-            } else {
-                // по умолчанию возвращаемый тип – один (уже есть type)
-                returnTypes.push_back(std::move(type));
-            }
-            // Тело функции (блок или ';' для объявления)
+
+            // Тело функции (блок или ';')
             std::optional<BlockStmt> body;
             if (it != end && isToken<Tokenization::Semicolon>(it->token)) {
-                ++it;
-                // объявление без тела
+                ++it; // объявление без тела
             } else if (it != end && isToken<Tokenization::LeftBrace>(it->token)) {
                 body = StmtParser::parseBlock(it, end);
             } else {
                 throwSyntaxError(currentPosition(it, end), "Expected function body or ';'");
             }
-            return FunctionDef{name, std::move(params), std::move(returnTypes), variadic, body};
-        } else {
-            // Глобальная переменная
+
+            return FunctionDef{std::move(name), std::move(params), std::move(returnTypes), variadic, std::move(body)};
+        }
+        else {
+            // === Глобальная переменная ===
+            if (returnTypes.size() > 1) {
+                throwSyntaxError(currentPosition(it, end), "Global variable cannot have multiple return types");
+            }
             std::optional<ExprNode> initializer;
             if (it != end && isToken<Tokenization::Assign>(it->token)) {
                 ++it;
@@ -875,7 +968,7 @@ private:
             if (it == end || !isToken<Tokenization::Semicolon>(it->token))
                 throwSyntaxError(currentPosition(it, end), "Expected ';' after global variable");
             ++it;
-            return GlobalVarDef{std::move(type), name, initializer};
+            return GlobalVarDef{std::move(returnTypes[0]), std::move(name), std::move(initializer)};
         }
     }
 };
@@ -886,13 +979,15 @@ ParsingInfo Parser::parse(const std::vector<Tokenization::TokenInfo>& tokens) {
     auto it = tokens.begin();
     auto end = tokens.end();
     TranslationUnit tu;
-    std::unordered_map<const void*, Position> positions;
+    std::unordered_map<const void*, Util::Position> positions;
     std::vector<std::string> errors;
     std::vector<std::string> warnings;
 
+    int i = 0;
     while (it != end) {
         try {
             auto pos = it->position;
+            std::cerr << "Main parse: token = " << it->token << " at " << pos.toString() << std::endl;
             DefNode def = detail::DefParser::parse(it, end);
             tu.definitions.push_back(std::move(def));
             positions[&tu.definitions.back()] = pos;

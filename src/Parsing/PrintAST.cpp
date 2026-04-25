@@ -1,5 +1,5 @@
 #include "../../include/Parsing/PrintAST.hpp"
-#include <Util/Overloaded.hpp>
+#include "../../include/Utils/Overloaded.hpp"
 
 namespace Parsing {
 
@@ -8,7 +8,7 @@ static std::string indentStr(int indent) {
 }
 
 static void printType(const TypeNode& type, std::ostream& out, int indent) {
-    std::visit(overloaded{
+    std::visit(Util::overloaded{
         [&](const VoidType&) { out << "void"; },
         [&](const IntType&) { out << "int"; },
         [&](const UnsignedType&) { out << "unsigned"; },
@@ -51,7 +51,7 @@ static void printExpr(const ExprNode& expr, std::ostream& out, int indent);
 static void printStmt(const StmtNode& stmt, std::ostream& out, int indent);
 
 static void printExpr(const ExprNode& expr, std::ostream& out, int indent) {
-    std::visit(overloaded{
+    std::visit(Util::overloaded{
         [&](const IntLiteral& lit) { out << lit.value; },
         [&](const FloatLiteral& lit) { out << lit.value; },
         [&](const StringLiteral& lit) { out << "\"" << lit.value << "\""; },
@@ -157,14 +157,22 @@ static void printExpr(const ExprNode& expr, std::ostream& out, int indent) {
             if (std::holds_alternative<TypeNode>(s.operand)) {
                 out << "("; printType(std::get<TypeNode>(s.operand), out, indent); out << ")";
             } else {
-                printExpr(*std::get<Boxed<ExprNode>>(s.operand), out, indent);
+                printExpr(*std::get<Util::Boxed<ExprNode>>(s.operand), out, indent);
             }
+        },
+        [&](const InitListExpr& list) {
+            out << "{ ";
+            for (size_t i = 0; i < list.values.size(); ++i) {
+                if (i) out << ", ";
+                printExpr(*list.values[i], out, indent);
+            }
+            out << " }";
         }
     }, expr);
 }
 
 static void printStmt(const StmtNode& stmt, std::ostream& out, int indent) {
-    std::visit(overloaded{
+    std::visit(Util::overloaded{
         [&](const ExprStmt& e) {
             out << indentStr(indent); printExpr(*e.expr, out, indent); out << ";\n";
         },
@@ -275,8 +283,16 @@ static void printStmt(const StmtNode& stmt, std::ostream& out, int indent) {
     }, stmt);
 }
 
+static void printBlockStmt(const BlockStmt& block, std::ostream& out, int indent) {
+    out << indentStr(indent) << "{\n";
+    for (const auto& stmt : block.statements) {
+        printStmt(*stmt, out, indent + 1);
+    }
+    out << indentStr(indent) << "}\n";
+}
+
 static void printDef(const DefNode& def, std::ostream& out, int indent) {
-    std::visit(overloaded{
+    std::visit(Util::overloaded{
         [&](const FunctionDef& f) {
             out << indentStr(indent);
             // возвращаемые типы
@@ -302,7 +318,7 @@ static void printDef(const DefNode& def, std::ostream& out, int indent) {
             out << ")";
             if (f.body) {
                 out << " ";
-                printStmt(*f.body, out, indent);
+                printBlockStmt(*f.body, out, indent);
             } else {
                 out << ";\n";
             }

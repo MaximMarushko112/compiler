@@ -13,30 +13,31 @@ void runTest(const std::string& source, const std::string& testName) {
     std::cout << "\n========== " << testName << " ==========\n";
     std::cout << "Source code:\n" << source << "\n";
 
-    // Токенизация
-    std::vector<std::string> tokenErrors;
-    auto tokens = Tokenization::Tokenizer::tokenize(source, &tokenErrors);
+    try {
+        std::cout << "tokens" << '\n';
+        // Токенизация
+        auto tokens = Tokenization::Tokenizer::tokenize(source);
 
-    if (!tokenErrors.empty()) {
-        std::cout << "Tokenization errors:\n";
-        for (const auto& err : tokenErrors)
-            std::cout << "  " << err << "\n";
-        return;
+        for (const auto& tok : tokens) {
+            std::visit([](const auto& t) { std::cout << "  " << t << "\n"; }, tok.token);
+        }
+        
+        // Парсинг
+        auto parsingInfo = Parsing::Parser::parse(tokens);
+
+        if (!parsingInfo.errors.empty()) {
+            std::cout << "Parsing errors:\n";
+            for (const auto& err : parsingInfo.errors)
+                std::cout << "  " << err << "\n";
+            return;
+        }
+
+        // Успех – выводим AST
+        std::cout << "AST:\n";
+        Parsing::printAST(parsingInfo.ast, std::cout);
+    } catch (const std::runtime_error& e) {
+        std::cout << "Error: " << e.what() << "\n";
     }
-
-    // Парсинг
-    auto parsingInfo = Parsing::Parser::parse(tokens);
-
-    if (!parsingInfo.errors.empty()) {
-        std::cout << "Parsing errors:\n";
-        for (const auto& err : parsingInfo.errors)
-            std::cout << "  " << err << "\n";
-        return;
-    }
-
-    // Успех – выводим AST
-    std::cout << "AST:\n";
-    Parsing::printAST(parsingInfo.ast, std::cout);
 }
 
 int main() {
