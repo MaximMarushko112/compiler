@@ -14,9 +14,7 @@ struct Position {
     void newLine() { ++line; column = 0; }
 
     std::string toString() const {
-        char buf[32];
-        snprintf(buf, sizeof(buf), "%d:%d", line, column);
-        return buf;
+        return std::to_string(line) + ":" + std::to_string(column);
     }
 };
 

@@ -206,6 +206,62 @@ void Tokenizer::handleSingleCharToken(char ch, std::vector<TokenInfo>& tokens, c
     curPos.advance();
 }
 
+// ---------- Новые вспомогательные методы для упрощения tokenize ----------
+
+bool Tokenizer::tryProcessNumber(const std::string& source, size_t& pos, Position& curPos,
+                                 std::vector<TokenInfo>& tokens, const Position& startPos) {
+    if (std::isdigit(static_cast<unsigned char>(source[pos]))) {
+        TokenVariant tok = processNumber(source, pos, curPos);
+        tokens.emplace_back(tok, startPos);
+        return true;
+    }
+    return false;
+}
+
+bool Tokenizer::tryProcessString(const std::string& source, size_t& pos, Position& curPos,
+                                 std::vector<TokenInfo>& tokens, const Position& startPos) {
+    if (source[pos] == '"') {
+        TokenVariant tok = processString(source, pos, curPos);
+        tokens.emplace_back(tok, startPos);
+        return true;
+    }
+    return false;
+}
+
+bool Tokenizer::tryProcessOperator(const std::string& source, size_t& pos, Position& curPos,
+                                   std::vector<TokenInfo>& tokens, const Position& startPos) {
+    if (auto op = matchOperator(source, pos)) {
+        const auto& [opStr, tok] = *op;
+        tokens.emplace_back(tok, startPos);
+        pos += opStr.size();
+        for (size_t i = 0; i < opStr.size(); ++i) curPos.advance();
+        return true;
+    }
+    return false;
+}
+
+bool Tokenizer::tryProcessIdentifier(const std::string& source, size_t& pos, Position& curPos,
+                                     std::vector<TokenInfo>& tokens, const Position& startPos) {
+    char ch = source[pos];
+    if (std::isalpha(static_cast<unsigned char>(ch)) || ch == '_') {
+        size_t start = pos;
+        while (pos < source.size() && isIdentifierChar(source[pos])) {
+            ++pos;
+            curPos.advance();
+        }
+        std::string lexeme = source.substr(start, pos - start);
+        TokenVariant tok = getKeywordOrIdentifier(lexeme);
+        tokens.emplace_back(tok, startPos);
+        return true;
+    }
+    return false;
+}
+
+void Tokenizer::processSingleChar(char ch, const Position& startPos, size_t& pos, Position& curPos,
+                                  std::vector<TokenInfo>& tokens) {
+    handleSingleCharToken(ch, tokens, startPos, pos, curPos);
+}
+
 // ---------- Главный метод токенизации ----------
 std::vector<TokenInfo> Tokenizer::tokenize(const std::string& source) {
     std::vector<TokenInfo> tokens;
@@ -237,44 +293,14 @@ std::vector<TokenInfo> Tokenizer::tokenize(const std::string& source) {
 
         Position startPos = curPos;
 
-        // Числа
-        if (std::isdigit(ch)) {
-            TokenVariant tok = processNumber(source, pos, curPos);
-            tokens.emplace_back(tok, startPos);
-            continue;
-        }
+        // Обработка различных типов лексем (каждый метод сам обновляет pos/curPos и добавляет токен)
+        if (tryProcessNumber(source, pos, curPos, tokens, startPos)) continue;
+        if (tryProcessString(source, pos, curPos, tokens, startPos)) continue;
+        if (tryProcessOperator(source, pos, curPos, tokens, startPos)) continue;
+        if (tryProcessIdentifier(source, pos, curPos, tokens, startPos)) continue;
 
-        // Строковые литералы
-        if (ch == '"') {
-            TokenVariant tok = processString(source, pos, curPos);
-            tokens.emplace_back(tok, startPos);
-            continue;
-        }
-
-        // Операторы (в том числе многосимвольные)
-        if (auto op = matchOperator(source, pos)) {
-            const auto& [opStr, tok] = *op;
-            tokens.emplace_back(tok, startPos);
-            pos += opStr.size();
-            for (size_t i = 0; i < opStr.size(); ++i) curPos.advance();
-            continue;
-        }
-
-        // Идентификаторы и ключевые слова
-        if (std::isalpha(ch) || ch == '_') {
-            size_t start = pos;
-            while (pos < source.size() && isIdentifierChar(source[pos])) {
-                ++pos;
-                curPos.advance();
-            }
-            std::string lexeme = source.substr(start, pos - start);
-            TokenVariant tok = getKeywordOrIdentifier(lexeme);
-            tokens.emplace_back(tok, startPos);
-            continue;
-        }
-
-        // Одиночные символы-разделители (не вошедшие в операторы)
-        handleSingleCharToken(ch, tokens, startPos, pos, curPos);
+        // Отдельные символы (скобки, точки с запятой и т.п.)
+        processSingleChar(ch, startPos, pos, curPos, tokens);
     }
 
     return tokens;

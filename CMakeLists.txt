@@ -13,6 +13,7 @@ set(SOURCES
     src/Tokenization/Tokenizer.cpp
     src/Parsing/Parser.cpp
     src/Parsing/PrintAST.cpp
+    src/Parsing/ASTNodes.cpp
     src/main.cpp   # если main.cpp лежит в src/
 )
 

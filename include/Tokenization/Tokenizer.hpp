@@ -21,6 +21,11 @@ private:
     static bool isWhitespace(char c);
     static bool isIdentifierChar(char c);
     static void handleSingleCharToken(char ch, std::vector<TokenInfo>& tokens, const Position& startPos, size_t& pos, Position& curPos);
+    static bool tryProcessNumber(const std::string& source, size_t& pos, Position& curPos, std::vector<TokenInfo>& tokens, const Position& startPos);
+    static bool tryProcessString(const std::string& source, size_t& pos, Position& curPos, std::vector<TokenInfo>& tokens, const Position& startPos);
+    static bool tryProcessOperator(const std::string& source, size_t& pos, Position& curPos, std::vector<TokenInfo>& tokens, const Position& startPos);
+    static bool tryProcessIdentifier(const std::string& source, size_t& pos, Position& curPos, std::vector<TokenInfo>& tokens, const Position& startPos);
+    static void processSingleChar(char ch, const Position& startPos, size_t& pos, Position& curPos, std::vector<TokenInfo>& tokens);
 };
 
 } // namespace Tokenization

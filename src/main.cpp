@@ -14,31 +14,31 @@ void runTest(const std::string& source, const std::string& testName) {
     std::cout << "Source code:\n" << source << "\n";
 
     try {
-        std::cout << "tokens" << '\n';
-        // Токенизация
+        std::cout << "Tokens:\n";
         auto tokens = Tokenization::Tokenizer::tokenize(source);
-
         for (const auto& tok : tokens) {
             std::visit([](const auto& t) { std::cout << "  " << t << "\n"; }, tok.token);
         }
         
         // Парсинг
-        auto parsingInfo = Parsing::Parser::parse(tokens);
+        Parsing::Parser parser;
+        Parsing::TranslationUnit ast = parser.parse(tokens);
 
-        if (!parsingInfo.errors.empty()) {
+        if (!parser.getErrors().empty()) {
             std::cout << "Parsing errors:\n";
-            for (const auto& err : parsingInfo.errors)
+            for (const auto& err : parser.getErrors())
                 std::cout << "  " << err << "\n";
             return;
         }
 
         // Успех – выводим AST
         std::cout << "AST:\n";
-        Parsing::printAST(parsingInfo.ast, std::cout);
+        Parsing::printAST(ast, std::cout);
     } catch (const std::runtime_error& e) {
         std::cout << "Error: " << e.what() << "\n";
     }
 }
+
 
 int main() {
     // Пример 1: функция с множественным возвратом и множественное присваивание
