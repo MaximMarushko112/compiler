@@ -481,221 +481,237 @@ private:
         printToken(it, end, "StmtParser::parseStatement");
         if (it == end) throwSyntaxError(Util::Position(), "Expected statement");
 
-        if (isToken<Tokenization::If>(it->token)) {
+        if (isToken<Tokenization::If>(it->token)) return parseIfStatement(it, end);
+        if (isToken<Tokenization::While>(it->token)) return parseWhileStatement(it, end);
+        if (isToken<Tokenization::Do>(it->token)) return parseDoWhileStatement(it, end);
+        if (isToken<Tokenization::For>(it->token)) return parseForStatement(it, end);
+        if (isToken<Tokenization::Switch>(it->token)) return parseSwitchStatement(it, end);
+        if (isToken<Tokenization::Break>(it->token)) return parseBreakStatement(it, end);
+        if (isToken<Tokenization::Continue>(it->token)) return parseContinueStatement(it, end);
+        if (isToken<Tokenization::Return>(it->token)) return parseReturnStatement(it, end);
+        if (isToken<Tokenization::Goto>(it->token)) return parseGotoStatement(it, end);
+        if (auto* id = std::get_if<Tokenization::Identifier>(&it->token))
+            return parseLabelOrExpressionStatement(it, end, *id);
+        if (isToken<Tokenization::LeftBrace>(it->token)) return parseBlockStatement(it, end);
+        if (isToken<Tokenization::Struct>(it->token) || isToken<Tokenization::Enum>(it->token))
+            return parseStructEnumDeclaration(it, end);
+        return parseVarDeclaration(it, end);
+    }
+
+    static std::unique_ptr<Stmt> parseIfStatement(TokenIter& it, TokenIter end) {
+        ++it;
+        if (it == end || !isToken<Tokenization::LeftParenthesis>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected '(' after if");
+        ++it;
+        auto cond = ExprParser::parse(it, end);
+        if (it == end || !isToken<Tokenization::RightParenthesis>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected ')'");
+        ++it;
+        auto thenStmt = parseStatement(it, end);
+        std::optional<std::unique_ptr<Stmt>> elseStmt;
+        if (it != end && isToken<Tokenization::Else>(it->token)) {
             ++it;
-            if (it == end || !isToken<Tokenization::LeftParenthesis>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected '(' after if");
-            ++it;
-            auto cond = ExprParser::parse(it, end);
-            if (it == end || !isToken<Tokenization::RightParenthesis>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected ')'");
-            ++it;
-            auto thenStmt = parseStatement(it, end);
-            std::optional<std::unique_ptr<Stmt>> elseStmt;
-            if (it != end && isToken<Tokenization::Else>(it->token)) {
+            elseStmt = parseStatement(it, end);
+        }
+        return std::make_unique<IfStmt>(std::move(cond), std::move(thenStmt), std::move(elseStmt));
+    }
+
+    static std::unique_ptr<Stmt> parseWhileStatement(TokenIter& it, TokenIter end) {
+        ++it;
+        if (it == end || !isToken<Tokenization::LeftParenthesis>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected '(' after while");
+        ++it;
+        auto cond = ExprParser::parse(it, end);
+        if (it == end || !isToken<Tokenization::RightParenthesis>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected ')'");
+        ++it;
+        auto body = parseStatement(it, end);
+        return std::make_unique<WhileStmt>(std::move(cond), std::move(body));
+    }
+
+    static std::unique_ptr<Stmt> parseDoWhileStatement(TokenIter& it, TokenIter end) {
+        ++it;
+        auto body = parseStatement(it, end);
+        if (it == end || !isToken<Tokenization::While>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected 'while' after do body");
+        ++it;
+        if (it == end || !isToken<Tokenization::LeftParenthesis>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected '(' after while");
+        ++it;
+        auto cond = ExprParser::parse(it, end);
+        if (it == end || !isToken<Tokenization::RightParenthesis>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected ')'");
+        ++it;
+        if (it == end || !isToken<Tokenization::Semicolon>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected ';' after do-while");
+        ++it;
+        return std::make_unique<DoWhileStmt>(std::move(body), std::move(cond));
+    }
+
+    static std::unique_ptr<Stmt> parseForStatement(TokenIter& it, TokenIter end) {
+        ++it;
+        if (it == end || !isToken<Tokenization::LeftParenthesis>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected '(' after for");
+        ++it;
+        std::optional<std::unique_ptr<Stmt>> init;
+        if (!isToken<Tokenization::Semicolon>(it->token)) {
+            if (isToken<Tokenization::Int>(it->token) || isToken<Tokenization::Unsigned>(it->token) ||
+                isToken<Tokenization::Float>(it->token) || isToken<Tokenization::Bool>(it->token) ||
+                isToken<Tokenization::String>(it->token) || isToken<Tokenization::Struct>(it->token) ||
+                isToken<Tokenization::Enum>(it->token)) {
+                auto type = TypeParser::parse(it, end, true, true);
+                if (it == end || !isToken<Tokenization::Identifier>(it->token))
+                    throwSyntaxError(currentPosition(it, end), "Expected variable name");
+                std::string name = std::get<Tokenization::Identifier>(it->token).name;
                 ++it;
-                elseStmt = parseStatement(it, end);
-            }
-            return std::make_unique<IfStmt>(std::move(cond), std::move(thenStmt), std::move(elseStmt));
-        }
-
-        if (isToken<Tokenization::While>(it->token)) {
-            ++it;
-            if (it == end || !isToken<Tokenization::LeftParenthesis>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected '(' after while");
-            ++it;
-            auto cond = ExprParser::parse(it, end);
-            if (it == end || !isToken<Tokenization::RightParenthesis>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected ')'");
-            ++it;
-            auto body = parseStatement(it, end);
-            return std::make_unique<WhileStmt>(std::move(cond), std::move(body));
-        }
-
-        if (isToken<Tokenization::Do>(it->token)) {
-            ++it;
-            auto body = parseStatement(it, end);
-            if (it == end || !isToken<Tokenization::While>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected 'while' after do body");
-            ++it;
-            if (it == end || !isToken<Tokenization::LeftParenthesis>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected '(' after while");
-            ++it;
-            auto cond = ExprParser::parse(it, end);
-            if (it == end || !isToken<Tokenization::RightParenthesis>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected ')'");
-            ++it;
-            if (it == end || !isToken<Tokenization::Semicolon>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected ';' after do-while");
-            ++it;
-            return std::make_unique<DoWhileStmt>(std::move(body), std::move(cond));
-        }
-
-        if (isToken<Tokenization::For>(it->token)) {
-            ++it;
-            if (it == end || !isToken<Tokenization::LeftParenthesis>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected '(' after for");
-            ++it;
-            std::optional<std::unique_ptr<Stmt>> init;
-            if (!isToken<Tokenization::Semicolon>(it->token)) {
-                if (isToken<Tokenization::Int>(it->token) || isToken<Tokenization::Unsigned>(it->token) ||
-                    isToken<Tokenization::Float>(it->token) || isToken<Tokenization::Bool>(it->token) ||
-                    isToken<Tokenization::String>(it->token) || isToken<Tokenization::Struct>(it->token) ||
-                    isToken<Tokenization::Enum>(it->token)) {
-                    auto type = TypeParser::parse(it, end, true, true);
-                    if (it == end || !isToken<Tokenization::Identifier>(it->token))
-                        throwSyntaxError(currentPosition(it, end), "Expected variable name");
-                    std::string name = std::get<Tokenization::Identifier>(it->token).name;
+                std::optional<std::unique_ptr<Expr>> initializer;
+                if (it != end && isToken<Tokenization::Assign>(it->token)) {
                     ++it;
-                    std::optional<std::unique_ptr<Expr>> initializer;
-                    if (it != end && isToken<Tokenization::Assign>(it->token)) {
-                        ++it;
-                        initializer = ExprParser::parse(it, end);
-                    }
-                    init = std::make_unique<VarDeclStmt>(std::move(type), name, std::move(initializer));
-                } else {
-                    auto expr = ExprParser::parse(it, end);
-                    init = std::make_unique<ExprStmt>(std::move(expr));
-                }
-            }
-            if (it == end || !isToken<Tokenization::Semicolon>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected ';' after for init");
-            ++it;
-            std::optional<std::unique_ptr<Expr>> condition;
-            if (!isToken<Tokenization::Semicolon>(it->token)) {
-                condition = ExprParser::parse(it, end);
-            }
-            if (it == end || !isToken<Tokenization::Semicolon>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected ';' after for condition");
-            ++it;
-            std::optional<std::unique_ptr<Expr>> increment;
-            if (!isToken<Tokenization::RightParenthesis>(it->token)) {
-                increment = ExprParser::parse(it, end);
-            }
-            if (it == end || !isToken<Tokenization::RightParenthesis>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected ')' after for clauses");
-            ++it;
-            auto body = parseStatement(it, end);
-            return std::make_unique<ForStmt>(std::move(init), std::move(condition), std::move(increment), std::move(body));
-        }
-
-        if (isToken<Tokenization::Switch>(it->token)) {
-            ++it;
-            if (it == end || !isToken<Tokenization::LeftParenthesis>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected '(' after switch");
-            ++it;
-            auto control = ExprParser::parse(it, end);
-            if (it == end || !isToken<Tokenization::RightParenthesis>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected ')'");
-            ++it;
-            auto body = parseStatement(it, end);
-            return std::make_unique<SwitchStmt>(std::move(control), std::move(body));
-        }
-
-        if (isToken<Tokenization::Break>(it->token)) {
-            ++it;
-            if (it == end || !isToken<Tokenization::Semicolon>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected ';' after break");
-            ++it;
-            return std::make_unique<BreakStmt>();
-        }
-
-        if (isToken<Tokenization::Continue>(it->token)) {
-            ++it;
-            if (it == end || !isToken<Tokenization::Semicolon>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected ';' after continue");
-            ++it;
-            return std::make_unique<ContinueStmt>();
-        }
-
-        if (isToken<Tokenization::Return>(it->token)) {
-            ++it;
-            std::vector<std::unique_ptr<Expr>> values;
-            if (it != end && !isToken<Tokenization::Semicolon>(it->token)) {
-                do {
-                    values.push_back(ExprParser::parse(it, end));
-                    if (it != end && isToken<Tokenization::Comma>(it->token)) ++it;
-                    else break;
-                } while (true);
-            }
-            if (it == end || !isToken<Tokenization::Semicolon>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected ';' after return");
-            ++it;
-            return std::make_unique<ReturnStmt>(std::move(values));
-        }
-
-        if (isToken<Tokenization::Goto>(it->token)) {
-            ++it;
-            if (it == end || !isToken<Tokenization::Identifier>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected label name after goto");
-            std::string label = std::get<Tokenization::Identifier>(it->token).name;
-            ++it;
-            if (it == end || !isToken<Tokenization::Semicolon>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected ';' after goto");
-            ++it;
-            return std::make_unique<GotoStmt>(label);
-        }
-
-        if (auto* id = std::get_if<Tokenization::Identifier>(&it->token)) {
-            auto saved = it;
-            ++it;
-            if (it != end && isToken<Tokenization::Colon>(it->token)) {
-                ++it;
-                auto stmt = parseStatement(it, end);
-                return std::make_unique<LabelStmt>(id->name, std::move(stmt));
-            }
-            it = saved;
-            auto expr = ExprParser::parse(it, end);
-            if (it == end || !isToken<Tokenization::Semicolon>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected ';' after expression statement");
-            ++it;
-            return std::make_unique<ExprStmt>(std::move(expr));
-        }
-
-        if (isToken<Tokenization::LeftBrace>(it->token)) {
-            BlockStmt block = parseBlock(it, end);
-            return std::make_unique<BlockStmt>(std::move(block));
-        }
-
-        if (isToken<Tokenization::Struct>(it->token) || isToken<Tokenization::Enum>(it->token)) {
-            // Локальное объявление struct/enum переменной (C-style)
-            bool isStruct = isToken<Tokenization::Struct>(it->token);
-            ++it;
-            if (it == end || !isToken<Tokenization::Identifier>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected struct/enum name");
-            std::string typeName = std::get<Tokenization::Identifier>(it->token).name;
-            ++it;
-            auto type = std::make_unique<NamedType>(typeName);
-            if (it == end || !isToken<Tokenization::Identifier>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected variable name");
-            std::string varName = std::get<Tokenization::Identifier>(it->token).name;
-            ++it;
-            std::optional<std::unique_ptr<Expr>> initializer;
-            if (it != end && isToken<Tokenization::Assign>(it->token)) {
-                ++it;
-                if (isToken<Tokenization::LeftBrace>(it->token)) {
-                    ++it;
-                    std::vector<std::unique_ptr<Expr>> initValues;
-                    while (it != end && !isToken<Tokenization::RightBrace>(it->token)) {
-                        initValues.push_back(ExprParser::parse(it, end));
-                        if (it != end && isToken<Tokenization::Comma>(it->token)) ++it;
-                        else break;
-                    }
-                    if (it == end || !isToken<Tokenization::RightBrace>(it->token))
-                        throwSyntaxError(currentPosition(it, end), "Expected '}' after initializer list");
-                    ++it;
-                    initializer = std::make_unique<InitListExpr>(std::move(initValues));
-                } else {
                     initializer = ExprParser::parse(it, end);
                 }
+                init = std::make_unique<VarDeclStmt>(std::move(type), name, std::move(initializer));
+            } else {
+                auto expr = ExprParser::parse(it, end);
+                init = std::make_unique<ExprStmt>(std::move(expr));
             }
-            if (it == end || !isToken<Tokenization::Semicolon>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected ';' after variable declaration");
-            ++it;
-            return std::make_unique<VarDeclStmt>(std::move(type), varName, std::move(initializer));
         }
+        if (it == end || !isToken<Tokenization::Semicolon>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected ';' after for init");
+        ++it;
+        std::optional<std::unique_ptr<Expr>> condition;
+        if (!isToken<Tokenization::Semicolon>(it->token)) {
+            condition = ExprParser::parse(it, end);
+        }
+        if (it == end || !isToken<Tokenization::Semicolon>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected ';' after for condition");
+        ++it;
+        std::optional<std::unique_ptr<Expr>> increment;
+        if (!isToken<Tokenization::RightParenthesis>(it->token)) {
+            increment = ExprParser::parse(it, end);
+        }
+        if (it == end || !isToken<Tokenization::RightParenthesis>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected ')' after for clauses");
+        ++it;
+        auto body = parseStatement(it, end);
+        return std::make_unique<ForStmt>(std::move(init), std::move(condition), std::move(increment), std::move(body));
+    }
 
-        // Объявление переменной без struct/enum
+    static std::unique_ptr<Stmt> parseSwitchStatement(TokenIter& it, TokenIter end) {
+        ++it;
+        if (it == end || !isToken<Tokenization::LeftParenthesis>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected '(' after switch");
+        ++it;
+        auto control = ExprParser::parse(it, end);
+        if (it == end || !isToken<Tokenization::RightParenthesis>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected ')'");
+        ++it;
+        auto body = parseStatement(it, end);
+        return std::make_unique<SwitchStmt>(std::move(control), std::move(body));
+    }
+
+    static std::unique_ptr<Stmt> parseBreakStatement(TokenIter& it, TokenIter end) {
+        ++it;
+        if (it == end || !isToken<Tokenization::Semicolon>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected ';' after break");
+        ++it;
+        return std::make_unique<BreakStmt>();
+    }
+
+    static std::unique_ptr<Stmt> parseContinueStatement(TokenIter& it, TokenIter end) {
+        ++it;
+        if (it == end || !isToken<Tokenization::Semicolon>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected ';' after continue");
+        ++it;
+        return std::make_unique<ContinueStmt>();
+    }
+
+    static std::unique_ptr<Stmt> parseReturnStatement(TokenIter& it, TokenIter end) {
+        ++it;
+        std::vector<std::unique_ptr<Expr>> values;
+        if (it != end && !isToken<Tokenization::Semicolon>(it->token)) {
+            do {
+                values.push_back(ExprParser::parse(it, end));
+                if (it != end && isToken<Tokenization::Comma>(it->token)) ++it;
+                else break;
+            } while (true);
+        }
+        if (it == end || !isToken<Tokenization::Semicolon>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected ';' after return");
+        ++it;
+        return std::make_unique<ReturnStmt>(std::move(values));
+    }
+
+    static std::unique_ptr<Stmt> parseGotoStatement(TokenIter& it, TokenIter end) {
+        ++it;
+        if (it == end || !isToken<Tokenization::Identifier>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected label name after goto");
+        std::string label = std::get<Tokenization::Identifier>(it->token).name;
+        ++it;
+        if (it == end || !isToken<Tokenization::Semicolon>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected ';' after goto");
+        ++it;
+        return std::make_unique<GotoStmt>(label);
+    }
+
+    static std::unique_ptr<Stmt> parseLabelOrExpressionStatement(TokenIter& it, TokenIter end, const Tokenization::Identifier& id) {
+        auto saved = it;
+        ++it;
+        if (it != end && isToken<Tokenization::Colon>(it->token)) {
+            ++it;
+            auto stmt = parseStatement(it, end);
+            return std::make_unique<LabelStmt>(id.name, std::move(stmt));
+        }
+        it = saved;
+        auto expr = ExprParser::parse(it, end);
+        if (it == end || !isToken<Tokenization::Semicolon>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected ';' after expression statement");
+        ++it;
+        return std::make_unique<ExprStmt>(std::move(expr));
+    }
+
+    static std::unique_ptr<Stmt> parseBlockStatement(TokenIter& it, TokenIter end) {
+        BlockStmt block = parseBlock(it, end);
+        return std::make_unique<BlockStmt>(std::move(block));
+    }
+
+    static std::unique_ptr<Stmt> parseStructEnumDeclaration(TokenIter& it, TokenIter end) {
+        bool isStruct = isToken<Tokenization::Struct>(it->token);
+        ++it;
+        if (it == end || !isToken<Tokenization::Identifier>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected struct/enum name");
+        std::string typeName = std::get<Tokenization::Identifier>(it->token).name;
+        ++it;
+        auto type = std::make_unique<NamedType>(typeName);
+        if (it == end || !isToken<Tokenization::Identifier>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected variable name");
+        std::string varName = std::get<Tokenization::Identifier>(it->token).name;
+        ++it;
+        std::optional<std::unique_ptr<Expr>> initializer;
+        if (it != end && isToken<Tokenization::Assign>(it->token)) {
+            ++it;
+            if (isToken<Tokenization::LeftBrace>(it->token)) {
+                ++it;
+                std::vector<std::unique_ptr<Expr>> initValues;
+                while (it != end && !isToken<Tokenization::RightBrace>(it->token)) {
+                    initValues.push_back(ExprParser::parse(it, end));
+                    if (it != end && isToken<Tokenization::Comma>(it->token)) ++it;
+                    else break;
+                }
+                if (it == end || !isToken<Tokenization::RightBrace>(it->token))
+                    throwSyntaxError(currentPosition(it, end), "Expected '}' after initializer list");
+                ++it;
+                initializer = std::make_unique<InitListExpr>(std::move(initValues));
+            } else {
+                initializer = ExprParser::parse(it, end);
+            }
+        }
+        if (it == end || !isToken<Tokenization::Semicolon>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected ';' after variable declaration");
+        ++it;
+        return std::make_unique<VarDeclStmt>(std::move(type), varName, std::move(initializer));
+    }
+
+    static std::unique_ptr<Stmt> parseVarDeclaration(TokenIter& it, TokenIter end) {
         auto type = TypeParser::parse(it, end, true, true);
         if (it == end || !isToken<Tokenization::Identifier>(it->token))
             throwSyntaxError(currentPosition(it, end), "Expected variable name");
@@ -733,76 +749,13 @@ public:
         printToken(it, end, "DefParser::parse");
         if (it == end) throwSyntaxError(Util::Position(), "Expected definition");
 
-        // Обработка отдельных типов для функций/глобальных переменных
         if (isToken<Tokenization::Int>(it->token) || isToken<Tokenization::Unsigned>(it->token) ||
             isToken<Tokenization::Float>(it->token) || isToken<Tokenization::Bool>(it->token) ||
             isToken<Tokenization::String>(it->token) || isToken<Tokenization::Void>(it->token)) {
             return parseFunctionOrGlobal(it, end);
         }
-
-        if (isToken<Tokenization::Struct>(it->token)) {
-            ++it;
-            if (it == end || !isToken<Tokenization::Identifier>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected struct name");
-            std::string name = std::get<Tokenization::Identifier>(it->token).name;
-            ++it;
-            if (it == end || !isToken<Tokenization::LeftBrace>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected '{' for struct definition");
-            ++it;
-            std::vector<std::pair<std::string, std::unique_ptr<Type>>> fields;
-            while (it != end && !isToken<Tokenization::RightBrace>(it->token)) {
-                auto fieldType = TypeParser::parse(it, end, true, true);
-                if (it == end || !isToken<Tokenization::Identifier>(it->token))
-                    throwSyntaxError(currentPosition(it, end), "Expected field name");
-                std::string fname = std::get<Tokenization::Identifier>(it->token).name;
-                ++it;
-                if (it != end && isToken<Tokenization::Semicolon>(it->token)) ++it;
-                else throwSyntaxError(currentPosition(it, end), "Expected ';' after field");
-                fields.emplace_back(fname, std::move(fieldType));
-            }
-            if (it == end) throwSyntaxError(Util::Position(), "Expected '}'");
-            ++it;
-            if (it == end || !isToken<Tokenization::Semicolon>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected ';' after struct definition");
-            ++it;
-            return std::make_unique<StructDef>(name, std::move(fields));
-        }
-
-        if (isToken<Tokenization::Enum>(it->token)) {
-            ++it;
-            if (it == end || !isToken<Tokenization::Identifier>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected enum name");
-            std::string name = std::get<Tokenization::Identifier>(it->token).name;
-            ++it;
-            if (it == end || !isToken<Tokenization::LeftBrace>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected '{' for enum definition");
-            ++it;
-            std::vector<std::pair<std::string, std::optional<int>>> enumerators;
-            while (it != end && !isToken<Tokenization::RightBrace>(it->token)) {
-                if (it == end || !isToken<Tokenization::Identifier>(it->token))
-                    throwSyntaxError(currentPosition(it, end), "Expected enumerator name");
-                std::string ename = std::get<Tokenization::Identifier>(it->token).name;
-                ++it;
-                std::optional<int> value;
-                if (it != end && isToken<Tokenization::Assign>(it->token)) {
-                    ++it;
-                    if (it == end || !isToken<Tokenization::IntLiteral>(it->token))
-                        throwSyntaxError(currentPosition(it, end), "Expected integer constant");
-                    value = std::get<Tokenization::IntLiteral>(it->token).value;
-                    ++it;
-                }
-                enumerators.emplace_back(ename, value);
-                if (it != end && isToken<Tokenization::Comma>(it->token)) ++it;
-                else break;
-            }
-            if (it == end) throwSyntaxError(Util::Position(), "Expected '}'");
-            ++it;
-            if (it == end || !isToken<Tokenization::Semicolon>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected ';' after enum definition");
-            ++it;
-            return std::make_unique<EnumDef>(name, std::move(enumerators));
-        }
-
+        if (isToken<Tokenization::Struct>(it->token)) return parseStructDefinition(it, end);
+        if (isToken<Tokenization::Enum>(it->token)) return parseEnumDefinition(it, end);
         throwSyntaxError(it->position, "Expected function, global variable, struct or enum definition");
     }
 
@@ -827,58 +780,129 @@ private:
         std::string name = std::get<Tokenization::Identifier>(it->token).name;
         ++it;
 
-        if (it != end && isToken<Tokenization::LeftParenthesis>(it->token)) {
-            // Функция
-            ++it;
-            std::vector<Param> params;
-            bool variadic = false;
-            if (!isToken<Tokenization::RightParenthesis>(it->token)) {
-                do {
-                    if (isToken<Tokenization::Ellipsis>(it->token)) {
-                        variadic = true;
-                        ++it;
-                        break;
-                    }
-                    auto paramType = TypeParser::parse(it, end, true, true);
-                    std::string paramName;
-                    if (it != end && isToken<Tokenization::Identifier>(it->token)) {
-                        paramName = std::get<Tokenization::Identifier>(it->token).name;
-                        ++it;
-                    }
-                    params.emplace_back(paramName, std::move(paramType));
-                    if (it != end && isToken<Tokenization::Comma>(it->token)) ++it;
-                    else break;
-                } while (true);
-            }
-            if (it == end || !isToken<Tokenization::RightParenthesis>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected ')' after parameters");
-            ++it;
+        if (it != end && isToken<Tokenization::LeftParenthesis>(it->token))
+            return parseFunction(it, end, std::move(returnTypes), name);
+        else
+            return parseGlobalVariable(it, end, std::move(returnTypes), name);
+    }
 
-            std::optional<BlockStmt> body;
-            if (it != end && isToken<Tokenization::Semicolon>(it->token)) {
-                ++it;
-            } else if (it != end && isToken<Tokenization::LeftBrace>(it->token)) {
-                body = StmtParser::parseBlock(it, end);
-            } else {
-                throwSyntaxError(currentPosition(it, end), "Expected function body or ';'");
-            }
+    static std::unique_ptr<Def> parseFunction(TokenIter& it, TokenIter end,
+                                               std::vector<std::unique_ptr<Type>> returnTypes,
+                                               const std::string& name) {
+        ++it; // '('
+        std::vector<Param> params;
+        bool variadic = false;
+        if (!isToken<Tokenization::RightParenthesis>(it->token)) {
+            do {
+                if (isToken<Tokenization::Ellipsis>(it->token)) {
+                    variadic = true;
+                    ++it;
+                    break;
+                }
+                auto paramType = TypeParser::parse(it, end, true, true);
+                std::string paramName;
+                if (it != end && isToken<Tokenization::Identifier>(it->token)) {
+                    paramName = std::get<Tokenization::Identifier>(it->token).name;
+                    ++it;
+                }
+                params.emplace_back(paramName, std::move(paramType));
+                if (it != end && isToken<Tokenization::Comma>(it->token)) ++it;
+                else break;
+            } while (true);
+        }
+        if (it == end || !isToken<Tokenization::RightParenthesis>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected ')' after parameters");
+        ++it;
 
-            return std::make_unique<FunctionDef>(name, std::move(params), std::move(returnTypes), variadic, std::move(body));
+        std::optional<BlockStmt> body;
+        if (it != end && isToken<Tokenization::Semicolon>(it->token)) {
+            ++it;
+        } else if (it != end && isToken<Tokenization::LeftBrace>(it->token)) {
+            body = StmtParser::parseBlock(it, end);
         } else {
-            // Глобальная переменная
-            if (returnTypes.size() > 1) {
-                throwSyntaxError(currentPosition(it, end), "Global variable cannot have multiple return types");
-            }
-            std::optional<std::unique_ptr<Expr>> initializer;
+            throwSyntaxError(currentPosition(it, end), "Expected function body or ';'");
+        }
+        return std::make_unique<FunctionDef>(name, std::move(params), std::move(returnTypes), variadic, std::move(body));
+    }
+
+    static std::unique_ptr<Def> parseGlobalVariable(TokenIter& it, TokenIter end,
+                                                     std::vector<std::unique_ptr<Type>> returnTypes,
+                                                     const std::string& name) {
+        if (returnTypes.size() > 1) {
+            throwSyntaxError(currentPosition(it, end), "Global variable cannot have multiple return types");
+        }
+        std::optional<std::unique_ptr<Expr>> initializer;
+        if (it != end && isToken<Tokenization::Assign>(it->token)) {
+            ++it;
+            initializer = ExprParser::parse(it, end);
+        }
+        if (it == end || !isToken<Tokenization::Semicolon>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected ';' after global variable");
+        ++it;
+        return std::make_unique<GlobalVarDef>(std::move(returnTypes[0]), name, std::move(initializer));
+    }
+
+    static std::unique_ptr<Def> parseStructDefinition(TokenIter& it, TokenIter end) {
+        ++it;
+        if (it == end || !isToken<Tokenization::Identifier>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected struct name");
+        std::string name = std::get<Tokenization::Identifier>(it->token).name;
+        ++it;
+        if (it == end || !isToken<Tokenization::LeftBrace>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected '{' for struct definition");
+        ++it;
+        std::vector<std::pair<std::string, std::unique_ptr<Type>>> fields;
+        while (it != end && !isToken<Tokenization::RightBrace>(it->token)) {
+            auto fieldType = TypeParser::parse(it, end, true, true);
+            if (it == end || !isToken<Tokenization::Identifier>(it->token))
+                throwSyntaxError(currentPosition(it, end), "Expected field name");
+            std::string fname = std::get<Tokenization::Identifier>(it->token).name;
+            ++it;
+            if (it != end && isToken<Tokenization::Semicolon>(it->token)) ++it;
+            else throwSyntaxError(currentPosition(it, end), "Expected ';' after field");
+            fields.emplace_back(fname, std::move(fieldType));
+        }
+        if (it == end) throwSyntaxError(Util::Position(), "Expected '}'");
+        ++it;
+        if (it == end || !isToken<Tokenization::Semicolon>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected ';' after struct definition");
+        ++it;
+        return std::make_unique<StructDef>(name, std::move(fields));
+    }
+
+    static std::unique_ptr<Def> parseEnumDefinition(TokenIter& it, TokenIter end) {
+        ++it;
+        if (it == end || !isToken<Tokenization::Identifier>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected enum name");
+        std::string name = std::get<Tokenization::Identifier>(it->token).name;
+        ++it;
+        if (it == end || !isToken<Tokenization::LeftBrace>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected '{' for enum definition");
+        ++it;
+        std::vector<std::pair<std::string, std::optional<int>>> enumerators;
+        while (it != end && !isToken<Tokenization::RightBrace>(it->token)) {
+            if (it == end || !isToken<Tokenization::Identifier>(it->token))
+                throwSyntaxError(currentPosition(it, end), "Expected enumerator name");
+            std::string ename = std::get<Tokenization::Identifier>(it->token).name;
+            ++it;
+            std::optional<int> value;
             if (it != end && isToken<Tokenization::Assign>(it->token)) {
                 ++it;
-                initializer = ExprParser::parse(it, end);
+                if (it == end || !isToken<Tokenization::IntLiteral>(it->token))
+                    throwSyntaxError(currentPosition(it, end), "Expected integer constant");
+                value = std::get<Tokenization::IntLiteral>(it->token).value;
+                ++it;
             }
-            if (it == end || !isToken<Tokenization::Semicolon>(it->token))
-                throwSyntaxError(currentPosition(it, end), "Expected ';' after global variable");
-            ++it;
-            return std::make_unique<GlobalVarDef>(std::move(returnTypes[0]), name, std::move(initializer));
+            enumerators.emplace_back(ename, value);
+            if (it != end && isToken<Tokenization::Comma>(it->token)) ++it;
+            else break;
         }
+        if (it == end) throwSyntaxError(Util::Position(), "Expected '}'");
+        ++it;
+        if (it == end || !isToken<Tokenization::Semicolon>(it->token))
+            throwSyntaxError(currentPosition(it, end), "Expected ';' after enum definition");
+        ++it;
+        return std::make_unique<EnumDef>(name, std::move(enumerators));
     }
 };
 
