@@ -1,130 +1,26 @@
 #pragma once
 
+#include "Types.hpp"
+#include "ASTVisitor.hpp"
 #include <vector>
 #include <memory>
 #include <optional>
 #include <string>
 #include <variant>
 #include <iostream>
-
 #include <Utils/Position.hpp>
 
 namespace Parsing {
 
-class ASTVisitor; // forward declaration
-
 // ---------------------------------------------------------------------
-// Base classes with virtual destructor and pure virtual accept
+// Expressions
 // ---------------------------------------------------------------------
-class Type {
-public:
-    virtual ~Type() = 0;
-    virtual void accept(ASTVisitor& visitor) const = 0;
-    virtual std::unique_ptr<Type> clone() const = 0;
-};
-
 class Expr {
 public:
     virtual ~Expr() = 0;
     virtual void accept(ASTVisitor& visitor) const = 0;
 };
 
-class Stmt {
-public:
-    virtual ~Stmt() = 0;
-    virtual void accept(ASTVisitor& visitor) const = 0;
-};
-
-class Def {
-public:
-    virtual ~Def() = 0;
-    virtual void accept(ASTVisitor& visitor) const = 0;
-};
-
-// ---------------------------------------------------------------------
-// Concrete Types (все наследуют Type)
-// ---------------------------------------------------------------------
-class VoidType : public Type {
-public:
-    void accept(ASTVisitor& visitor) const override;
-    std::unique_ptr<Type> clone() const override;
-};
-
-class IntType : public Type {
-public:
-    void accept(ASTVisitor& visitor) const override;
-    std::unique_ptr<Type> clone() const override;
-};
-
-class UnsignedType : public Type {
-public:
-    void accept(ASTVisitor& visitor) const override;
-    std::unique_ptr<Type> clone() const override;
-};
-
-class FloatType : public Type {
-public:
-    void accept(ASTVisitor& visitor) const override;
-    std::unique_ptr<Type> clone() const override;
-};
-
-class BoolType : public Type {
-public:
-    void accept(ASTVisitor& visitor) const override;
-    std::unique_ptr<Type> clone() const override;
-};
-
-class StringType : public Type {
-public:
-    void accept(ASTVisitor& visitor) const override;
-    std::unique_ptr<Type> clone() const override;
-};
-
-class NamedType : public Type {
-public:
-    std::string name;
-    explicit NamedType(std::string n) : name(std::move(n)) {}
-    void accept(ASTVisitor& visitor) const override;
-    std::unique_ptr<Type> clone() const override;
-};
-
-class PointerType : public Type {
-public:
-    std::unique_ptr<Type> pointee;
-    explicit PointerType(std::unique_ptr<Type> p) : pointee(std::move(p)) {}
-    void accept(ASTVisitor& visitor) const override;
-    std::unique_ptr<Type> clone() const override;
-};
-
-class ArrayType : public Type {
-public:
-    std::unique_ptr<Type> elementType;
-    std::optional<int> size;
-    ArrayType(std::unique_ptr<Type> elem, std::optional<int> s = std::nullopt)
-        : elementType(std::move(elem)), size(s) {}
-    void accept(ASTVisitor& visitor) const override;
-    std::unique_ptr<Type> clone() const override;
-};
-
-class FunctionType : public Type {
-public:
-    std::vector<std::unique_ptr<Type>> parameterTypes;
-    std::vector<std::unique_ptr<Type>> returnTypes;
-    bool variadic = false;
-    void accept(ASTVisitor& visitor) const override;
-    std::unique_ptr<Type> clone() const override;
-};
-
-class TupleType : public Type {
-public:
-    std::vector<std::unique_ptr<Type>> types;
-    void accept(ASTVisitor& visitor) const override;
-    std::unique_ptr<Type> clone() const override;
-};
-
-// ---------------------------------------------------------------------
-// Expressions (все наследуют Expr)
-// ---------------------------------------------------------------------
 class IntLiteral : public Expr {
 public:
     int value;
@@ -229,10 +125,10 @@ public:
 
 class CallExpr : public Expr {
 public:
-    std::unique_ptr<Expr> callee;
+    std::string functionName;  // имя вызываемой функции
     std::vector<std::unique_ptr<Expr>> arguments;
-    CallExpr(std::unique_ptr<Expr> c, std::vector<std::unique_ptr<Expr>> args)
-        : callee(std::move(c)), arguments(std::move(args)) {}
+    CallExpr(std::string name, std::vector<std::unique_ptr<Expr>> args)
+        : functionName(std::move(name)), arguments(std::move(args)) {}
     void accept(ASTVisitor& visitor) const override;
 };
 
@@ -272,9 +168,43 @@ public:
     void accept(ASTVisitor& visitor) const override;
 };
 
+class PreIncrement : public Expr {
+public:
+    std::unique_ptr<Expr> operand;
+    explicit PreIncrement(std::unique_ptr<Expr> e) : operand(std::move(e)) {}
+    void accept(ASTVisitor& visitor) const override;
+};
+
+class PostIncrement : public Expr {
+public:
+    std::unique_ptr<Expr> operand;
+    explicit PostIncrement(std::unique_ptr<Expr> e) : operand(std::move(e)) {}
+    void accept(ASTVisitor& visitor) const override;
+};
+
+class PreDecrement : public Expr {
+public:
+    std::unique_ptr<Expr> operand;
+    explicit PreDecrement(std::unique_ptr<Expr> e) : operand(std::move(e)) {}
+    void accept(ASTVisitor& visitor) const override;
+};
+
+class PostDecrement : public Expr {
+public:
+    std::unique_ptr<Expr> operand;
+    explicit PostDecrement(std::unique_ptr<Expr> e) : operand(std::move(e)) {}
+    void accept(ASTVisitor& visitor) const override;
+};
+
 // ---------------------------------------------------------------------
-// Statements (все наследуют Stmt)
+// Statements
 // ---------------------------------------------------------------------
+class Stmt {
+public:
+    virtual ~Stmt() = 0;
+    virtual void accept(ASTVisitor& visitor) const = 0;
+};
+
 class ExprStmt : public Stmt {
 public:
     std::unique_ptr<Expr> expr;
@@ -376,21 +306,6 @@ public:
     void accept(ASTVisitor& visitor) const override;
 };
 
-class GotoStmt : public Stmt {
-public:
-    std::string label;
-    explicit GotoStmt(std::string lbl) : label(std::move(lbl)) {}
-    void accept(ASTVisitor& visitor) const override;
-};
-
-class LabelStmt : public Stmt {
-public:
-    std::string name;
-    std::unique_ptr<Stmt> statement;
-    LabelStmt(std::string n, std::unique_ptr<Stmt> s) : name(std::move(n)), statement(std::move(s)) {}
-    void accept(ASTVisitor& visitor) const override;
-};
-
 class VarDeclStmt : public Stmt {
 public:
     std::unique_ptr<Type> type;
@@ -403,8 +318,14 @@ public:
 };
 
 // ---------------------------------------------------------------------
-// Definitions (все наследуют Def)
+// Definitions
 // ---------------------------------------------------------------------
+class Def {
+public:
+    virtual ~Def() = 0;
+    virtual void accept(ASTVisitor& visitor) const = 0;
+};
+
 struct Param {
     std::string name;
     std::unique_ptr<Type> type;
@@ -464,128 +385,13 @@ struct TranslationUnit {
 };
 
 // ---------------------------------------------------------------------
-// Visitor (абстрактный)
+// Inline implementations for Expr, Stmt, Def destructors and accept methods
 // ---------------------------------------------------------------------
-class ASTVisitor {
-public:
-    virtual ~ASTVisitor() = default;
-
-    // Types
-    virtual void visit(const VoidType&) {}
-    virtual void visit(const IntType&) {}
-    virtual void visit(const UnsignedType&) {}
-    virtual void visit(const FloatType&) {}
-    virtual void visit(const BoolType&) {}
-    virtual void visit(const StringType&) {}
-    virtual void visit(const NamedType&) {}
-    virtual void visit(const PointerType&) {}
-    virtual void visit(const ArrayType&) {}
-    virtual void visit(const FunctionType&) {}
-    virtual void visit(const TupleType&) {}
-
-    // Expressions
-    virtual void visit(const IntLiteral&) {}
-    virtual void visit(const FloatLiteral&) {}
-    virtual void visit(const StringLiteral&) {}
-    virtual void visit(const BoolLiteral&) {}
-    virtual void visit(const VariableExpr&) {}
-    virtual void visit(const UnaryOp&) {}
-    virtual void visit(const BinaryOp&) {}
-    virtual void visit(const AssignExpr&) {}
-    virtual void visit(const InitListExpr&) {}
-    virtual void visit(const MultiAssignExpr&) {}
-    virtual void visit(const ConditionalExpr&) {}
-    virtual void visit(const CallExpr&) {}
-    virtual void visit(const FieldAccessExpr&) {}
-    virtual void visit(const IndexExpr&) {}
-    virtual void visit(const CastExpr&) {}
-    virtual void visit(const SizeofExpr&) {}
-
-    // Statements
-    virtual void visit(const ExprStmt&) {}
-    virtual void visit(const BlockStmt&) {}
-    virtual void visit(const IfStmt&) {}
-    virtual void visit(const WhileStmt&) {}
-    virtual void visit(const DoWhileStmt&) {}
-    virtual void visit(const ForStmt&) {}
-    virtual void visit(const SwitchStmt&) {}
-    virtual void visit(const CaseStmt&) {}
-    virtual void visit(const BreakStmt&) {}
-    virtual void visit(const ContinueStmt&) {}
-    virtual void visit(const ReturnStmt&) {}
-    virtual void visit(const GotoStmt&) {}
-    virtual void visit(const LabelStmt&) {}
-    virtual void visit(const VarDeclStmt&) {}
-
-    // Definitions
-    virtual void visit(const FunctionDef&) {}
-    virtual void visit(const GlobalVarDef&) {}
-    virtual void visit(const StructDef&) {}
-    virtual void visit(const EnumDef&) {}
-};
-
-// ---------------------------------------------------------------------
-// Inline implementations (destructors, accept, clone)
-// ---------------------------------------------------------------------
-
-// Destructors
-inline Type::~Type() = default;
 inline Expr::~Expr() = default;
 inline Stmt::~Stmt() = default;
 inline Def::~Def() = default;
 
-// ---------- Type ----------
-inline void VoidType::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
-inline std::unique_ptr<Type> VoidType::clone() const { return std::make_unique<VoidType>(*this); }
-
-inline void IntType::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
-inline std::unique_ptr<Type> IntType::clone() const { return std::make_unique<IntType>(*this); }
-
-inline void UnsignedType::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
-inline std::unique_ptr<Type> UnsignedType::clone() const { return std::make_unique<UnsignedType>(*this); }
-
-inline void FloatType::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
-inline std::unique_ptr<Type> FloatType::clone() const { return std::make_unique<FloatType>(*this); }
-
-inline void BoolType::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
-inline std::unique_ptr<Type> BoolType::clone() const { return std::make_unique<BoolType>(*this); }
-
-inline void StringType::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
-inline std::unique_ptr<Type> StringType::clone() const { return std::make_unique<StringType>(*this); }
-
-inline void NamedType::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
-inline std::unique_ptr<Type> NamedType::clone() const { return std::make_unique<NamedType>(name); }
-
-inline void PointerType::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
-inline std::unique_ptr<Type> PointerType::clone() const {
-    return std::make_unique<PointerType>(pointee ? pointee->clone() : nullptr);
-}
-
-inline void ArrayType::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
-inline std::unique_ptr<Type> ArrayType::clone() const {
-    return std::make_unique<ArrayType>(elementType ? elementType->clone() : nullptr, size);
-}
-
-inline void FunctionType::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
-inline std::unique_ptr<Type> FunctionType::clone() const {
-    auto cloned = std::make_unique<FunctionType>();
-    cloned->variadic = variadic;
-    for (const auto& p : parameterTypes)
-        cloned->parameterTypes.push_back(p ? p->clone() : nullptr);
-    for (const auto& r : returnTypes)
-        cloned->returnTypes.push_back(r ? r->clone() : nullptr);
-    return cloned;
-}
-
-inline void TupleType::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
-inline std::unique_ptr<Type> TupleType::clone() const {
-    auto cloned = std::make_unique<TupleType>();
-    for (const auto& t : types)
-        cloned->types.push_back(t ? t->clone() : nullptr);
-    return cloned;
-}
-
-// ---------- Expressions ----------
+// Expressions
 inline void IntLiteral::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
 inline void FloatLiteral::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
 inline void StringLiteral::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
@@ -602,8 +408,12 @@ inline void FieldAccessExpr::accept(ASTVisitor& visitor) const { visitor.visit(*
 inline void IndexExpr::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
 inline void CastExpr::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
 inline void SizeofExpr::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
+inline void PreIncrement::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
+inline void PostIncrement::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
+inline void PreDecrement::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
+inline void PostDecrement::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
 
-// ---------- Statements ----------
+// Statements
 inline void ExprStmt::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
 inline void BlockStmt::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
 inline void IfStmt::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
@@ -615,11 +425,9 @@ inline void CaseStmt::accept(ASTVisitor& visitor) const { visitor.visit(*this); 
 inline void BreakStmt::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
 inline void ContinueStmt::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
 inline void ReturnStmt::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
-inline void GotoStmt::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
-inline void LabelStmt::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
 inline void VarDeclStmt::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
 
-// ---------- Definitions ----------
+// Definitions
 inline void FunctionDef::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
 inline void GlobalVarDef::accept(ASTVisitor& visitor) const { visitor.visit(*this); }
 inline void StructDef::accept(ASTVisitor& visitor) const { visitor.visit(*this); }

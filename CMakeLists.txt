@@ -13,7 +13,6 @@ set(SOURCES
     src/Parsing/PrintAST.cpp
     src/Visitors/Interpreter.cpp
     src/Visitors/ScopeVisitor.cpp
-    src/Visitors/PrintVisitor.cpp
     src/main.cpp
 )
 

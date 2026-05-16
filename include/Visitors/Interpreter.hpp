@@ -12,19 +12,6 @@ public:
     Interpreter();
     int run(const TranslationUnit& tu);
 
-    // Types (не нужны)
-    void visit(const VoidType&) override {}
-    void visit(const IntType&) override {}
-    void visit(const UnsignedType&) override {}
-    void visit(const FloatType&) override {}
-    void visit(const BoolType&) override {}
-    void visit(const StringType&) override {}
-    void visit(const NamedType&) override {}
-    void visit(const PointerType&) override {}
-    void visit(const ArrayType&) override {}
-    void visit(const FunctionType&) override {}
-    void visit(const TupleType&) override {}
-
     // Expressions
     void visit(const IntLiteral&) override;
     void visit(const FloatLiteral&) override;
@@ -42,6 +29,10 @@ public:
     void visit(const IndexExpr&) override {}
     void visit(const CastExpr&) override;
     void visit(const SizeofExpr&) override;
+    void visit(const PreIncrement&) override;
+    void visit(const PostIncrement&) override;
+    void visit(const PreDecrement&) override;
+    void visit(const PostDecrement&) override;
 
     // Statements
     void visit(const ExprStmt&) override;
@@ -55,8 +46,6 @@ public:
     void visit(const BreakStmt&) override;
     void visit(const ContinueStmt&) override;
     void visit(const ReturnStmt&) override;
-    void visit(const GotoStmt&) override {}
-    void visit(const LabelStmt&) override {}
     void visit(const VarDeclStmt&) override;
 
     // Definitions
@@ -73,7 +62,7 @@ private:
     bool breakFlag;
     bool continueFlag;
     bool returnFlag;
-    int returnValue;
+    int mainReturnValue;
 
     int getVariableValue(const std::string& name);
     void setVariableValue(const std::string& name, int value);

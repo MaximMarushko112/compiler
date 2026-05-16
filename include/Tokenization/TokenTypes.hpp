@@ -85,7 +85,6 @@ TOKEN_STRUCT(Else)        // else
 TOKEN_STRUCT(Enum)        // enum
 TOKEN_STRUCT(Float)       // float
 TOKEN_STRUCT(For)         // for
-TOKEN_STRUCT(Goto)        // goto
 TOKEN_STRUCT(If)          // if
 TOKEN_STRUCT(Int)         // int
 TOKEN_STRUCT(Return)      // return
@@ -154,7 +153,7 @@ using TokenVariant = std::variant<
     LeftBracket, RightBracket, Comma, Dot, Semicolon,
     // Ключевые слова
     Auto, Break, Case, Const, Continue, Default, Do, Else, Enum,
-    Float, For, Goto, If, Int, Return, Sizeof, Struct, Switch,
+    Float, For, If, Int, Return, Sizeof, Struct, Switch,
     Unsigned, Void, While, Bool, String, True, False,
     // Литералы
     IntLiteral, FloatLiteral, StringLiteral,

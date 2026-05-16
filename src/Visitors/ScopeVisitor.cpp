@@ -3,14 +3,57 @@
 
 namespace Parsing {
 
-ScopeVisitor::ScopeVisitor() : currentScope(&globalScope) {}
+// ---------------------------------------------------------------------
+// Вспомогательная функция для сравнения типов
+// ---------------------------------------------------------------------
+static bool isTypeCompatible(const Type* a, const Type* b) {
+    if (!a || !b) return false;
+    if (dynamic_cast<const IntType*>(a) && dynamic_cast<const IntType*>(b)) return true;
+    if (dynamic_cast<const FloatType*>(a) && dynamic_cast<const FloatType*>(b)) return true;
+    if (dynamic_cast<const BoolType*>(a) && dynamic_cast<const BoolType*>(b)) return true;
+    if (dynamic_cast<const StringType*>(a) && dynamic_cast<const StringType*>(b)) return true;
+    if (dynamic_cast<const VoidType*>(a) && dynamic_cast<const VoidType*>(b)) return true;
+    if (auto na = dynamic_cast<const NamedType*>(a)) {
+        if (auto nb = dynamic_cast<const NamedType*>(b)) {
+            return na->name == nb->name;
+        }
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------------
+// Реализация методов Scope
+// ---------------------------------------------------------------------
+void Scope::addSymbol(const std::string& name, Symbol sym) {
+    auto it = symbols.find(name);
+    if (it != symbols.end()) {
+        return;
+    }
+    symbols[name] = std::move(sym);
+}
+
+Symbol* Scope::lookupSymbol(const std::string& name, bool currentOnly) {
+    Scope* sc = this;
+    while (sc) {
+        auto it = sc->symbols.find(name);
+        if (it != sc->symbols.end())
+            return &it->second;
+        if (currentOnly) break;
+        sc = sc->parent;
+    }
+    return nullptr;
+}
+
+// ---------------------------------------------------------------------
+// ScopeVisitor
+// ---------------------------------------------------------------------
+ScopeVisitor::ScopeVisitor() : currentScope(&globalScope), currentFuncReturnTypes(nullptr) {}
 
 void ScopeVisitor::build(const TranslationUnit& tu) {
-    // Добавляем встроенную функцию print
-    auto printType = std::make_unique<FunctionType>();
-    printType->parameterTypes.push_back(std::make_unique<IntType>());
-    printType->returnTypes.push_back(std::make_unique<VoidType>());
-    globalScope.symbols["print"] = Symbol{Symbol::Kind::Function, "print", std::move(printType)};
+    FunctionInfo printInfo;
+    printInfo.paramTypes.push_back(std::make_unique<IntType>());
+    printInfo.returnTypes.push_back(std::make_unique<VoidType>());
+    globalScope.addSymbol("print", std::move(printInfo));
     
     for (const auto& def : tu.definitions) {
         def->accept(*this);
@@ -35,30 +78,47 @@ void ScopeVisitor::exitScope() {
         currentScope = currentScope->parent;
 }
 
-void ScopeVisitor::addSymbol(const std::string& name, Symbol::Kind kind, std::unique_ptr<Type> type) {
-    auto it = currentScope->symbols.find(name);
-    if (it != currentScope->symbols.end()) {
+void ScopeVisitor::addSymbol(const std::string& name, Symbol sym) {
+    if (currentScope->lookupSymbol(name, true)) {
         error("Redeclaration of '" + name + "' in same scope");
         return;
     }
-    Symbol sym{kind, name, std::move(type)};
-    currentScope->symbols[name] = std::move(sym);
+    currentScope->addSymbol(name, std::move(sym));
 }
 
 Symbol* ScopeVisitor::lookupSymbol(const std::string& name, bool currentOnly) {
-    Scope* sc = currentScope;
-    while (sc) {
-        auto it = sc->symbols.find(name);
-        if (it != sc->symbols.end())
-            return &it->second;
-        if (currentOnly) break;
-        sc = sc->parent;
-    }
-    return nullptr;
+    return currentScope->lookupSymbol(name, currentOnly);
 }
 
 void ScopeVisitor::error(const std::string& msg) {
     errors.push_back(msg);
+}
+
+// ---------------------------------------------------------------------
+// Получение типа выражения
+// ---------------------------------------------------------------------
+std::unique_ptr<Type> ScopeVisitor::getExprType(const Expr* expr) {
+    if (auto lit = dynamic_cast<const IntLiteral*>(expr)) {
+        return std::make_unique<IntType>();
+    }
+    if (dynamic_cast<const FloatLiteral*>(expr)) {
+        return std::make_unique<FloatType>();
+    }
+    if (dynamic_cast<const StringLiteral*>(expr)) {
+        return std::make_unique<StringType>();
+    }
+    if (dynamic_cast<const BoolLiteral*>(expr)) {
+        return std::make_unique<BoolType>();
+    }
+    if (auto var = dynamic_cast<const VariableExpr*>(expr)) {
+        Symbol* sym = lookupSymbol(var->name);
+        if (sym && std::holds_alternative<VariableInfo>(*sym)) {
+            const VariableInfo& info = std::get<VariableInfo>(*sym);
+            return info.type->clone();
+        }
+    }
+    // Для остальных выражений – тип неизвестен
+    return nullptr;
 }
 
 // ---------------------------------------------------------------------
@@ -87,6 +147,11 @@ void ScopeVisitor::visit(const BinaryOp& b) {
 void ScopeVisitor::visit(const AssignExpr& a) {
     a.left->accept(*this);
     a.right->accept(*this);
+    auto leftType = getExprType(a.left.get());
+    auto rightType = getExprType(a.right.get());
+    if (leftType && rightType && !isTypeCompatible(leftType.get(), rightType.get())) {
+        error("Type mismatch in assignment");
+    }
 }
 
 void ScopeVisitor::visit(const InitListExpr& l) {
@@ -107,26 +172,41 @@ void ScopeVisitor::visit(const ConditionalExpr& c) {
 }
 
 void ScopeVisitor::visit(const CallExpr& call) {
-    call.callee->accept(*this);
-    for (const auto& arg : call.arguments) {
-        arg->accept(*this);
+    Symbol* sym = lookupSymbol(call.functionName);
+    if (!sym) {
+        error("Call to undeclared function '" + call.functionName + "'");
+        return;
     }
-    // Дополнительная проверка, что callee – функция
-    if (auto var = dynamic_cast<const VariableExpr*>(call.callee.get())) {
-        Symbol* sym = lookupSymbol(var->name);
-        if (!sym) {
-            error("Call to undeclared function '" + var->name + "'");
-        } else if (sym->kind != Symbol::Kind::Function) {
-            error("'" + var->name + "' is not a function");
+    if (!std::holds_alternative<FunctionInfo>(*sym)) {
+        error("'" + call.functionName + "' is not a function");
+        return;
+    }
+    const FunctionInfo& funcInfo = std::get<FunctionInfo>(*sym);
+    size_t expected = funcInfo.paramTypes.size();
+    size_t given = call.arguments.size();
+    if (funcInfo.variadic) {
+        if (given < expected) {
+            error("Too few arguments for function '" + call.functionName + "'");
         }
     } else {
-        error("Call to non-identifier expression");
+        if (given != expected) {
+            error("Wrong number of arguments for function '" + call.functionName +
+                  " (expected " + std::to_string(expected) + ", got " + std::to_string(given) + ")");
+        }
+    }
+    for (size_t i = 0; i < std::min(expected, given); ++i) {
+        auto argType = getExprType(call.arguments[i].get());
+        if (argType && !isTypeCompatible(argType.get(), funcInfo.paramTypes[i].get())) {
+            error("Type mismatch in argument " + std::to_string(i+1) + " of function '" + call.functionName + "'");
+        }
+    }
+    for (const auto& arg : call.arguments) {
+        arg->accept(*this);
     }
 }
 
 void ScopeVisitor::visit(const FieldAccessExpr& f) {
     f.object->accept(*this);
-    // поле не проверяется, так как его тип уже известен из структуры
 }
 
 void ScopeVisitor::visit(const IndexExpr& i) {
@@ -146,6 +226,11 @@ void ScopeVisitor::visit(const SizeofExpr& s) {
         std::get<std::unique_ptr<Expr>>(s.operand)->accept(*this);
     }
 }
+
+void ScopeVisitor::visit(const PreIncrement& e) { e.operand->accept(*this); }
+void ScopeVisitor::visit(const PostIncrement& e) { e.operand->accept(*this); }
+void ScopeVisitor::visit(const PreDecrement& e) { e.operand->accept(*this); }
+void ScopeVisitor::visit(const PostDecrement& e) { e.operand->accept(*this); }
 
 // ---------------------------------------------------------------------
 // Statements
@@ -201,23 +286,42 @@ void ScopeVisitor::visit(const CaseStmt& c) {
 
 void ScopeVisitor::visit(const BreakStmt&) {}
 void ScopeVisitor::visit(const ContinueStmt&) {}
+
 void ScopeVisitor::visit(const ReturnStmt& r) {
+    if (currentFuncReturnTypes == nullptr) {
+        error("Return statement outside function");
+        return;
+    }
+    if (r.values.size() != currentFuncReturnTypes->size()) {
+        error("Wrong number of return values (expected " + std::to_string(currentFuncReturnTypes->size()) +
+              ", got " + std::to_string(r.values.size()) + ")");
+    }
+    for (size_t i = 0; i < r.values.size() && i < currentFuncReturnTypes->size(); ++i) {
+        auto valType = getExprType(r.values[i].get());
+        if (valType && !isTypeCompatible(valType.get(), (*currentFuncReturnTypes)[i].get())) {
+            error("Type mismatch in return value " + std::to_string(i+1));
+        }
+    }
     for (const auto& val : r.values) {
         val->accept(*this);
     }
-}
-void ScopeVisitor::visit(const GotoStmt&) {}
-void ScopeVisitor::visit(const LabelStmt& l) {
-    l.statement->accept(*this);
 }
 
 void ScopeVisitor::visit(const VarDeclStmt& v) {
     if (lookupSymbol(v.name, true)) {
         error("Variable '" + v.name + "' already declared in this scope");
     } else {
-        addSymbol(v.name, Symbol::Kind::Variable, std::unique_ptr<Type>(v.type->clone()));
+        VariableInfo varInfo;
+        varInfo.type = v.type->clone();
+        addSymbol(v.name, std::move(varInfo));
+        if (v.initializer) {
+            auto initType = getExprType(v.initializer->get());
+            if (initType && !isTypeCompatible(initType.get(), v.type.get())) {
+                error("Initializer type mismatch for variable '" + v.name + "'");
+            }
+            (*v.initializer)->accept(*this);
+        }
     }
-    if (v.initializer) (*v.initializer)->accept(*this);
 }
 
 // ---------------------------------------------------------------------
@@ -227,21 +331,26 @@ void ScopeVisitor::visit(const FunctionDef& f) {
     if (lookupSymbol(f.name, true)) {
         error("Function '" + f.name + "' already declared");
     } else {
-        auto funcType = std::make_unique<FunctionType>();
+        FunctionInfo funcInfo;
         for (const auto& p : f.parameters) {
-            funcType->parameterTypes.push_back(std::unique_ptr<Type>(p.type->clone()));
+            funcInfo.paramTypes.push_back(p.type->clone());
         }
         for (const auto& rt : f.returnTypes) {
-            funcType->returnTypes.push_back(std::unique_ptr<Type>(rt->clone()));
+            funcInfo.returnTypes.push_back(rt->clone());
         }
-        funcType->variadic = f.variadic;
-        addSymbol(f.name, Symbol::Kind::Function, std::move(funcType));
+        funcInfo.variadic = f.variadic;
+        addSymbol(f.name, std::move(funcInfo));
     }
     enterScope();
     for (const auto& p : f.parameters) {
-        addSymbol(p.name, Symbol::Kind::Variable, std::unique_ptr<Type>(p.type->clone()));
+        VariableInfo varInfo;
+        varInfo.type = p.type->clone();
+        addSymbol(p.name, std::move(varInfo));
     }
+    auto oldReturnTypes = currentFuncReturnTypes;
+    currentFuncReturnTypes = &f.returnTypes;
     if (f.body) f.body->accept(*this);
+    currentFuncReturnTypes = oldReturnTypes;
     exitScope();
 }
 
@@ -249,8 +358,16 @@ void ScopeVisitor::visit(const GlobalVarDef& g) {
     if (lookupSymbol(g.name, true)) {
         error("Global variable '" + g.name + "' already declared");
     } else {
-        addSymbol(g.name, Symbol::Kind::Variable, std::unique_ptr<Type>(g.type->clone()));
-        if (g.initializer) (*g.initializer)->accept(*this);
+        VariableInfo varInfo;
+        varInfo.type = g.type->clone();
+        addSymbol(g.name, std::move(varInfo));
+        if (g.initializer) {
+            auto initType = getExprType(g.initializer->get());
+            if (initType && !isTypeCompatible(initType.get(), g.type.get())) {
+                error("Initializer type mismatch for global variable '" + g.name + "'");
+            }
+            (*g.initializer)->accept(*this);
+        }
     }
 }
 
@@ -258,11 +375,14 @@ void ScopeVisitor::visit(const StructDef& s) {
     if (lookupSymbol(s.name, true)) {
         error("Struct '" + s.name + "' already declared");
     } else {
-        auto structType = std::make_unique<NamedType>(s.name);
-        addSymbol(s.name, Symbol::Kind::Type, std::move(structType));
+        TypeInfo typeInfo;
+        typeInfo.type = std::make_unique<NamedType>(s.name);
+        addSymbol(s.name, std::move(typeInfo));
         enterScope();
         for (const auto& [fname, ftype] : s.fields) {
-            addSymbol(fname, Symbol::Kind::Variable, std::unique_ptr<Type>(ftype->clone()));
+            VariableInfo varInfo;
+            varInfo.type = ftype->clone();
+            addSymbol(fname, std::move(varInfo));
         }
         exitScope();
     }
@@ -272,12 +392,16 @@ void ScopeVisitor::visit(const EnumDef& e) {
     if (lookupSymbol(e.name, true)) {
         error("Enum '" + e.name + "' already declared");
     } else {
-        addSymbol(e.name, Symbol::Kind::Type, std::make_unique<NamedType>(e.name));
+        TypeInfo typeInfo;
+        typeInfo.type = std::make_unique<NamedType>(e.name);
+        addSymbol(e.name, std::move(typeInfo));
         for (const auto& [ename, optVal] : e.enumerators) {
             if (lookupSymbol(ename, true)) {
                 error("Enumerator '" + ename + "' already declared in this enum");
             } else {
-                addSymbol(ename, Symbol::Kind::Variable, std::make_unique<IntType>());
+                VariableInfo varInfo;
+                varInfo.type = std::make_unique<IntType>();
+                addSymbol(ename, std::move(varInfo));
             }
         }
     }

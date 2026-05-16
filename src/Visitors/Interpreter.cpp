@@ -11,7 +11,7 @@
 
 namespace Parsing {
 
-Interpreter::Interpreter() : result(0), breakFlag(false), continueFlag(false), returnFlag(false), returnValue(0) {}
+Interpreter::Interpreter() : result(0), breakFlag(false), continueFlag(false), returnFlag(false), mainReturnValue(0) {}
 
 int Interpreter::getVariableValue(const std::string& name) {
     auto it = variables.find(name);
@@ -22,7 +22,6 @@ int Interpreter::getVariableValue(const std::string& name) {
 }
 
 void Interpreter::setVariableValue(const std::string& name, int value) {
-    // Если переменная не объявлена, но это разрешено (например, для глобальных enum), просто создаём
     variables[name] = value;
 }
 
@@ -60,8 +59,8 @@ int Interpreter::run(const TranslationUnit& tu) {
     if (mainFunc->body) {
         mainFunc->body->accept(*this);
     }
-    DEBUG_LOG("Interpreter result: " << returnValue);
-    return returnValue;
+    DEBUG_LOG("Interpreter result: " << mainReturnValue);
+    return mainReturnValue;
 }
 
 // ---------------------------------------------------------------------
@@ -174,47 +173,32 @@ void Interpreter::visit(const ConditionalExpr& c) {
 }
 
 void Interpreter::visit(const CallExpr& c) {
-    if (auto var = dynamic_cast<const VariableExpr*>(c.callee.get())) {
-        const std::string& funcName = var->name;
-        if (funcName == "print") {
-            if (c.arguments.size() == 1) {
-                c.arguments[0]->accept(*this);
-                std::cout << result << std::endl;
-                result = 0;
-                return;
-            }
-            throw std::runtime_error("print expects 1 argument");
+    if (c.functionName == "print") {
+        if (c.arguments.size() == 1) {
+            c.arguments[0]->accept(*this);
+            std::cout << result << std::endl;
+            result = 0;
+            return;
         }
-        auto fit = functions.find(funcName);
-        if (fit == functions.end())
-            throw std::runtime_error("Unknown function: " + funcName);
-        const FunctionDef* func = fit->second;
-        if (c.arguments.size() != func->parameters.size())
-            throw std::runtime_error("Argument count mismatch for " + funcName);
-        auto oldVars = std::move(variables);
-        variables.clear();
-        for (size_t i = 0; i < c.arguments.size(); ++i) {
-            c.arguments[i]->accept(*this);
-            variables[func->parameters[i].name] = result;
-        }
-        // Сохраняем текущее состояние флагов
-        bool oldReturnFlag = returnFlag;
-        int oldReturnValue = returnValue;
-        // Сбрасываем перед вызовом функции
-        returnFlag = false;
-        returnValue = 0;
-        if (func->body) {
-            func->body->accept(*this);
-        }
-        // Результат функции – из returnValue
-        result = returnValue;
-        // Восстанавливаем флаги
-        returnFlag = oldReturnFlag;
-        returnValue = oldReturnValue;
-        variables = std::move(oldVars);
-        return;
+        throw std::runtime_error("print expects 1 argument");
     }
-    throw std::runtime_error("Call to non-identifier expression");
+    auto it = functions.find(c.functionName);
+    if (it == functions.end())
+        throw std::runtime_error("Unknown function: " + c.functionName);
+    const FunctionDef* func = it->second;
+    if (c.arguments.size() != func->parameters.size())
+        throw std::runtime_error("Argument count mismatch for " + c.functionName);
+    auto oldVars = std::move(variables);
+    variables.clear();
+    for (size_t i = 0; i < c.arguments.size(); ++i) {
+        c.arguments[i]->accept(*this);
+        variables[func->parameters[i].name] = result;
+    }
+    returnFlag = false;
+    mainReturnValue = 0;
+    if (func->body) func->body->accept(*this);
+    variables = std::move(oldVars);
+    result = mainReturnValue;
 }
 
 void Interpreter::visit(const CastExpr& c) {
@@ -223,6 +207,50 @@ void Interpreter::visit(const CastExpr& c) {
 
 void Interpreter::visit(const SizeofExpr&) {
     result = 4; // упрощённо
+}
+
+void Interpreter::visit(const PreIncrement& e) {
+    e.operand->accept(*this);
+    int val = result;
+    if (auto var = dynamic_cast<const VariableExpr*>(e.operand.get())) {
+        setVariableValue(var->name, val + 1);
+        result = val + 1;
+    } else {
+        throw std::runtime_error("Increment on non-variable");
+    }
+}
+
+void Interpreter::visit(const PostIncrement& e) {
+    e.operand->accept(*this);
+    int old = result;
+    if (auto var = dynamic_cast<const VariableExpr*>(e.operand.get())) {
+        setVariableValue(var->name, old + 1);
+        result = old;
+    } else {
+        throw std::runtime_error("Increment on non-variable");
+    }
+}
+
+void Interpreter::visit(const PreDecrement& e) {
+    e.operand->accept(*this);
+    int val = result;
+    if (auto var = dynamic_cast<const VariableExpr*>(e.operand.get())) {
+        setVariableValue(var->name, val - 1);
+        result = val + 1;
+    } else {
+        throw std::runtime_error("Increment on non-variable");
+    }
+}
+
+void Interpreter::visit(const PostDecrement& e) {
+    e.operand->accept(*this);
+    int old = result;
+    if (auto var = dynamic_cast<const VariableExpr*>(e.operand.get())) {
+        setVariableValue(var->name, old - 1);
+        result = old;
+    } else {
+        throw std::runtime_error("Increment on non-variable");
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -280,23 +308,7 @@ void Interpreter::visit(const ForStmt& f) {
         if (continueFlag) { continueFlag = false; continue; }
         if (f.increment) {
             DEBUG_LOG("Processing increment");
-            if (auto unary = dynamic_cast<const UnaryOp*>(f.increment->get())) {
-                if (unary->op == UnaryOp::Op::Plus) {
-                    if (auto inner = dynamic_cast<const UnaryOp*>(unary->operand.get())) {
-                        if (inner->op == UnaryOp::Op::Plus) {
-                            if (auto var = dynamic_cast<const VariableExpr*>(inner->operand.get())) {
-                                int v = getVariableValue(var->name);
-                                DEBUG_LOG("Increment " << var->name << " from " << v << " to " << v + 1);
-                                setVariableValue(var->name, v + 1);
-                            }
-                        }
-                    }
-                } else {
-                    (*f.increment)->accept(*this);
-                }
-            } else {
-                (*f.increment)->accept(*this);
-            }
+            (*f.increment)->accept(*this);
         }
         DEBUG_LOG("--- End of iteration ---");
     }
@@ -309,11 +321,11 @@ void Interpreter::visit(const ContinueStmt&) { continueFlag = true; }
 void Interpreter::visit(const ReturnStmt& r) {
     DEBUG_LOG("ReturnStmt: values count=" << r.values.size());
     if (r.values.empty()) {
-        returnValue = 0;
+        mainReturnValue = 0;
     } else {
         r.values[0]->accept(*this);
-        returnValue = result;
-        DEBUG_LOG("  return value = " << returnValue);
+        mainReturnValue = result;
+        DEBUG_LOG("  return value = " << mainReturnValue);
     }
     returnFlag = true;
 }

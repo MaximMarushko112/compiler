@@ -5,47 +5,42 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <variant>
 
 namespace Parsing {
 
-// Информация о символе (переменная, функция, тип)
-struct Symbol {
-    enum class Kind { Variable, Function, Type };
-    Kind kind;
-    std::string name;
-    std::unique_ptr<Type> type;      // для переменных и функций
-    // для функций дополнительно можно хранить параметры
+struct VariableInfo {
+    std::unique_ptr<Type> type;
+};
+
+struct FunctionInfo {
     std::vector<std::unique_ptr<Type>> paramTypes;
+    std::vector<std::unique_ptr<Type>> returnTypes;
     bool variadic = false;
 };
 
-// Область видимости
+struct TypeInfo {
+    std::unique_ptr<Type> type;  // для NamedType
+};
+
+using Symbol = std::variant<VariableInfo, FunctionInfo, TypeInfo>;
+
 struct Scope {
     Scope* parent = nullptr;
     std::map<std::string, Symbol> symbols;
     std::vector<std::unique_ptr<Scope>> children;
+
+    void addSymbol(const std::string& name, Symbol sym);
+    Symbol* lookupSymbol(const std::string& name, bool currentOnly = false);
 };
 
 class ScopeVisitor : public ASTVisitor {
 public:
     ScopeVisitor();
     void build(const TranslationUnit& tu);
-    void printErrors() const; // выводит накопленные ошибки
+    void printErrors() const;
 
-    // Types
-    void visit(const VoidType&) override {}
-    void visit(const IntType&) override {}
-    void visit(const UnsignedType&) override {}
-    void visit(const FloatType&) override {}
-    void visit(const BoolType&) override {}
-    void visit(const StringType&) override {}
-    void visit(const NamedType&) override {}
-    void visit(const PointerType&) override {}
-    void visit(const ArrayType&) override {}
-    void visit(const FunctionType&) override {}
-    void visit(const TupleType&) override {}
-
-        // Expressions
+    // Expressions
     void visit(const IntLiteral&) override;
     void visit(const FloatLiteral&) override;
     void visit(const StringLiteral&) override;
@@ -62,6 +57,10 @@ public:
     void visit(const IndexExpr&) override;
     void visit(const CastExpr&) override;
     void visit(const SizeofExpr&) override;
+    void visit(const PreIncrement&) override;
+    void visit(const PostIncrement&) override;
+    void visit(const PreDecrement&) override;
+    void visit(const PostDecrement&) override;
 
     // Statements
     void visit(const ExprStmt&) override;
@@ -75,8 +74,6 @@ public:
     void visit(const BreakStmt&) override;
     void visit(const ContinueStmt&) override;
     void visit(const ReturnStmt&) override;
-    void visit(const GotoStmt&) override;
-    void visit(const LabelStmt&) override;
     void visit(const VarDeclStmt&) override;
 
     // Definitions
@@ -84,18 +81,20 @@ public:
     void visit(const GlobalVarDef&) override;
     void visit(const StructDef&) override;
     void visit(const EnumDef&) override;
-    
+
 private:
     Scope globalScope;
     Scope* currentScope;
+    const std::vector<std::unique_ptr<Type>>* currentFuncReturnTypes = nullptr; // для проверки return
 
     std::vector<std::string> errors;
 
     void enterScope();
     void exitScope();
-    void addSymbol(const std::string& name, Symbol::Kind kind, std::unique_ptr<Type> type = nullptr);
+    void addSymbol(const std::string& name, Symbol sym);
     Symbol* lookupSymbol(const std::string& name, bool currentOnly = false);
     void error(const std::string& msg);
+    std::unique_ptr<Type> getExprType(const Expr* expr);
 };
 
 } // namespace Parsing

@@ -1,6 +1,8 @@
 #pragma once
 
 #include "ASTNodes.hpp"
+#include "ASTVisitor.hpp"
+#include "Types.hpp"
 #include <Tokenization/Token.hpp>
 #include <vector>
 #include <unordered_map>

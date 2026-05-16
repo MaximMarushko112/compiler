@@ -32,6 +32,8 @@ static const std::vector<std::pair<std::string, TokenVariant>> OPERATOR_TABLE = 
     {"&", And{}},
     {"|", Or{}},
     {"^", Xor{}},
+    {"++", PlusPlus{}},
+    {"--", MinusMinus{}},
 };
 
 static std::vector<std::pair<std::string, TokenVariant>> buildSortedOperators() {

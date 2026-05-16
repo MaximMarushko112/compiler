@@ -33,7 +33,8 @@ void runTest(const std::string& source, const std::string& testName) {
         }
 
         std::cout << "AST:\n";
-        Parsing::printAST(ast, std::cout);
+        Parsing::PrintVisitor printVisitor(std::cout);
+        printVisitor.print(ast);
 
         // ---------- ScopeVisitor ----------
         std::cout << "\n--- Scope analysis ---\n";
