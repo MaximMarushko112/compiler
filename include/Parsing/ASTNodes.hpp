@@ -19,6 +19,7 @@ class Expr {
 public:
     virtual ~Expr() = 0;
     virtual void accept(ASTVisitor& visitor) const = 0;
+    virtual std::unique_ptr<Type> getType() const = 0;   // новый метод
 };
 
 class IntLiteral : public Expr {
@@ -26,6 +27,7 @@ public:
     int value;
     explicit IntLiteral(int v) : value(v) {}
     void accept(ASTVisitor& visitor) const override;
+    std::unique_ptr<Type> getType() const override { return std::make_unique<IntType>(); }
 };
 
 class FloatLiteral : public Expr {
@@ -33,6 +35,7 @@ public:
     float value;
     explicit FloatLiteral(float v) : value(v) {}
     void accept(ASTVisitor& visitor) const override;
+    std::unique_ptr<Type> getType() const override { return std::make_unique<FloatType>(); }
 };
 
 class StringLiteral : public Expr {
@@ -40,6 +43,7 @@ public:
     std::string value;
     explicit StringLiteral(std::string v) : value(std::move(v)) {}
     void accept(ASTVisitor& visitor) const override;
+    std::unique_ptr<Type> getType() const override { return std::make_unique<StringType>(); }
 };
 
 class BoolLiteral : public Expr {
@@ -47,6 +51,7 @@ public:
     bool value;
     explicit BoolLiteral(bool v) : value(v) {}
     void accept(ASTVisitor& visitor) const override;
+    std::unique_ptr<Type> getType() const override { return std::make_unique<BoolType>(); }
 };
 
 class VariableExpr : public Expr {
@@ -54,6 +59,7 @@ public:
     std::string name;
     explicit VariableExpr(std::string n) : name(std::move(n)) {}
     void accept(ASTVisitor& visitor) const override;
+    std::unique_ptr<Type> getType() const override { return nullptr; } // тип определяется по таблице символов
 };
 
 class UnaryOp : public Expr {
@@ -63,6 +69,13 @@ public:
     std::unique_ptr<Expr> operand;
     UnaryOp(Op o, std::unique_ptr<Expr> e) : op(o), operand(std::move(e)) {}
     void accept(ASTVisitor& visitor) const override;
+    std::unique_ptr<Type> getType() const override {
+        if (!operand) return nullptr;
+        auto childType = operand->getType();
+        if (!childType) return nullptr;
+        // Унарные операции не меняют тип
+        return childType->clone();
+    }
 };
 
 class BinaryOp : public Expr {
@@ -81,6 +94,37 @@ public:
     BinaryOp(Op o, std::unique_ptr<Expr> l, std::unique_ptr<Expr> r)
         : op(o), left(std::move(l)), right(std::move(r)) {}
     void accept(ASTVisitor& visitor) const override;
+    std::unique_ptr<Type> getType() const override {
+        if (!left || !right) return nullptr;
+        auto leftType = left->getType();
+        auto rightType = right->getType();
+        if (!leftType || !rightType) return nullptr;
+        // Определяем тип результата
+        switch (op) {
+            case Op::Add:
+            case Op::Sub:
+            case Op::Mul:
+            case Op::Div:
+            case Op::Rem:
+            case Op::ShiftLeft:
+            case Op::ShiftRight:
+            case Op::BitAnd:
+            case Op::BitXor:
+            case Op::BitOr:
+                return std::make_unique<IntType>();
+            case Op::Less:
+            case Op::LessEqual:
+            case Op::Greater:
+            case Op::GreaterEqual:
+            case Op::Equal:
+            case Op::NotEqual:
+            case Op::LogicalAnd:
+            case Op::LogicalOr:
+                return std::make_unique<BoolType>();
+            default:
+                return nullptr;
+        }
+    }
 };
 
 class AssignExpr : public Expr {
@@ -95,6 +139,11 @@ public:
     AssignExpr(std::unique_ptr<Expr> l, std::unique_ptr<Expr> r, Op o = Op::Assign)
         : left(std::move(l)), right(std::move(r)), op(o) {}
     void accept(ASTVisitor& visitor) const override;
+    std::unique_ptr<Type> getType() const override {
+        // Присваивание возвращает тип левой части
+        if (!left) return nullptr;
+        return left->getType();
+    }
 };
 
 class InitListExpr : public Expr {
@@ -102,6 +151,7 @@ public:
     std::vector<std::unique_ptr<Expr>> values;
     explicit InitListExpr(std::vector<std::unique_ptr<Expr>> vals) : values(std::move(vals)) {}
     void accept(ASTVisitor& visitor) const override;
+    std::unique_ptr<Type> getType() const override { return nullptr; } // тип зависит от контекста
 };
 
 class MultiAssignExpr : public Expr {
@@ -111,6 +161,11 @@ public:
     MultiAssignExpr(std::vector<std::unique_ptr<Expr>> l, std::vector<std::unique_ptr<Expr>> r)
         : lefts(std::move(l)), rights(std::move(r)) {}
     void accept(ASTVisitor& visitor) const override;
+    std::unique_ptr<Type> getType() const override {
+        // Возвращаем тип последнего правого выражения (для простоты)
+        if (rights.empty()) return nullptr;
+        return rights.back()->getType();
+    }
 };
 
 class ConditionalExpr : public Expr {
@@ -121,15 +176,24 @@ public:
     ConditionalExpr(std::unique_ptr<Expr> c, std::unique_ptr<Expr> t, std::unique_ptr<Expr> e)
         : cond(std::move(c)), thenExpr(std::move(t)), elseExpr(std::move(e)) {}
     void accept(ASTVisitor& visitor) const override;
+    std::unique_ptr<Type> getType() const override {
+        if (!thenExpr || !elseExpr) return nullptr;
+        auto thenType = thenExpr->getType();
+        auto elseType = elseExpr->getType();
+        if (!thenType || !elseType) return nullptr;
+        // Упрощённо: считаем, что типы then и else совместимы, возвращаем thenType
+        return thenType->clone();
+    }
 };
 
 class CallExpr : public Expr {
 public:
-    std::string functionName;  // имя вызываемой функции
+    std::string functionName;
     std::vector<std::unique_ptr<Expr>> arguments;
     CallExpr(std::string name, std::vector<std::unique_ptr<Expr>> args)
         : functionName(std::move(name)), arguments(std::move(args)) {}
     void accept(ASTVisitor& visitor) const override;
+    std::unique_ptr<Type> getType() const override { return nullptr; } // тип определяется по таблице символов
 };
 
 class FieldAccessExpr : public Expr {
@@ -140,6 +204,7 @@ public:
     FieldAccessExpr(std::unique_ptr<Expr> obj, std::string f, bool arrow)
         : object(std::move(obj)), field(std::move(f)), isArrow(arrow) {}
     void accept(ASTVisitor& visitor) const override;
+    std::unique_ptr<Type> getType() const override { return nullptr; } // требует знания структуры
 };
 
 class IndexExpr : public Expr {
@@ -149,6 +214,11 @@ public:
     IndexExpr(std::unique_ptr<Expr> arr, std::unique_ptr<Expr> idx)
         : array(std::move(arr)), index(std::move(idx)) {}
     void accept(ASTVisitor& visitor) const override;
+    std::unique_ptr<Type> getType() const override {
+        // Тип элемента массива – упрощённо: если array – указатель или массив, то тип элемента
+        if (!array) return nullptr;
+        return array->getType(); // заглушка, в реальности нужно разыменование
+    }
 };
 
 class CastExpr : public Expr {
@@ -158,6 +228,10 @@ public:
     CastExpr(std::unique_ptr<Type> t, std::unique_ptr<Expr> e)
         : targetType(std::move(t)), operand(std::move(e)) {}
     void accept(ASTVisitor& visitor) const override;
+    std::unique_ptr<Type> getType() const override {
+        if (!targetType) return nullptr;
+        return targetType->clone();
+    }
 };
 
 class SizeofExpr : public Expr {
@@ -166,6 +240,7 @@ public:
     SizeofExpr(std::unique_ptr<Type> t) : operand(std::move(t)) {}
     SizeofExpr(std::unique_ptr<Expr> e) : operand(std::move(e)) {}
     void accept(ASTVisitor& visitor) const override;
+    std::unique_ptr<Type> getType() const override { return std::make_unique<IntType>(); }
 };
 
 class PreIncrement : public Expr {
@@ -173,6 +248,10 @@ public:
     std::unique_ptr<Expr> operand;
     explicit PreIncrement(std::unique_ptr<Expr> e) : operand(std::move(e)) {}
     void accept(ASTVisitor& visitor) const override;
+    std::unique_ptr<Type> getType() const override {
+        if (!operand) return nullptr;
+        return operand->getType();
+    }
 };
 
 class PostIncrement : public Expr {
@@ -180,6 +259,10 @@ public:
     std::unique_ptr<Expr> operand;
     explicit PostIncrement(std::unique_ptr<Expr> e) : operand(std::move(e)) {}
     void accept(ASTVisitor& visitor) const override;
+    std::unique_ptr<Type> getType() const override {
+        if (!operand) return nullptr;
+        return operand->getType();
+    }
 };
 
 class PreDecrement : public Expr {
@@ -187,6 +270,10 @@ public:
     std::unique_ptr<Expr> operand;
     explicit PreDecrement(std::unique_ptr<Expr> e) : operand(std::move(e)) {}
     void accept(ASTVisitor& visitor) const override;
+    std::unique_ptr<Type> getType() const override {
+        if (!operand) return nullptr;
+        return operand->getType();
+    }
 };
 
 class PostDecrement : public Expr {
@@ -194,6 +281,10 @@ public:
     std::unique_ptr<Expr> operand;
     explicit PostDecrement(std::unique_ptr<Expr> e) : operand(std::move(e)) {}
     void accept(ASTVisitor& visitor) const override;
+    std::unique_ptr<Type> getType() const override {
+        if (!operand) return nullptr;
+        return operand->getType();
+    }
 };
 
 // ---------------------------------------------------------------------

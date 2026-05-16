@@ -17,7 +17,7 @@ void PrintVisitor::print(const TranslationUnit& tu) {
     }
 }
 
-void PrintVisitor::printType(const Type& type) {
+void PrintVisitor::visit(const Type& type) {
     if (auto p = dynamic_cast<const PointerType*>(&type)) {
         printPointer(*p);
     } else if (auto a = dynamic_cast<const ArrayType*>(&type)) {
@@ -47,12 +47,12 @@ void PrintVisitor::printType(const Type& type) {
 }
 
 void PrintVisitor::printPointer(const PointerType& p) {
-    printType(*p.pointee);
+    visit(*p.pointee);
     out << '*';
 }
 
 void PrintVisitor::printArray(const ArrayType& a) {
-    printType(*a.elementType);
+    visit(*a.elementType);
     out << '[';
     if (a.size) out << *a.size;
     out << ']';
@@ -62,17 +62,17 @@ void PrintVisitor::printFunction(const FunctionType& f) {
     out << '(';
     for (size_t i = 0; i < f.parameterTypes.size(); ++i) {
         if (i) out << ", ";
-        printType(*f.parameterTypes[i]);
+        visit(*f.parameterTypes[i]);
     }
     if (f.variadic) out << ", ...";
     out << ") -> ";
     if (f.returnTypes.size() == 1) {
-        printType(*f.returnTypes[0]);
+        visit(*f.returnTypes[0]);
     } else {
         out << '(';
         for (size_t i = 0; i < f.returnTypes.size(); ++i) {
             if (i) out << ", ";
-            printType(*f.returnTypes[i]);
+            visit(*f.returnTypes[i]);
         }
         out << ')';
     }
@@ -82,24 +82,10 @@ void PrintVisitor::printTuple(const TupleType& t) {
     out << '(';
     for (size_t i = 0; i < t.types.size(); ++i) {
         if (i) out << ", ";
-        printType(*t.types[i]);
+        visit(*t.types[i]);
     }
     out << ')';
 }
-
-// Types
-void PrintVisitor::visit(const VoidType& t) { printType(t); }
-void PrintVisitor::visit(const IntType& t) { printType(t); }
-void PrintVisitor::visit(const UnsignedType& t) { printType(t); }
-void PrintVisitor::visit(const FloatType& t) { printType(t); }
-void PrintVisitor::visit(const BoolType& t) { printType(t); }
-void PrintVisitor::visit(const StringType& t) { printType(t); }
-void PrintVisitor::visit(const NamedType& t) { printType(t); }
-void PrintVisitor::visit(const PointerType& t) { printType(t); }
-void PrintVisitor::visit(const ArrayType& t) { printType(t); }
-void PrintVisitor::visit(const FunctionType& t) { printType(t); }
-void PrintVisitor::visit(const TupleType& t) { printType(t); }
-
 
 // Expressions
 void PrintVisitor::visit(const IntLiteral& lit)   { out << lit.value; }

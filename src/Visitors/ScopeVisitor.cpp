@@ -98,18 +98,16 @@ void ScopeVisitor::error(const std::string& msg) {
 // Получение типа выражения
 // ---------------------------------------------------------------------
 std::unique_ptr<Type> ScopeVisitor::getExprType(const Expr* expr) {
-    if (auto lit = dynamic_cast<const IntLiteral*>(expr)) {
-        return std::make_unique<IntType>();
+    if (!expr) return nullptr;
+
+    // Пробуем получить тип через виртуальный метод getType()
+    auto directType = expr->getType();
+    if (directType) {
+        return directType;
     }
-    if (dynamic_cast<const FloatLiteral*>(expr)) {
-        return std::make_unique<FloatType>();
-    }
-    if (dynamic_cast<const StringLiteral*>(expr)) {
-        return std::make_unique<StringType>();
-    }
-    if (dynamic_cast<const BoolLiteral*>(expr)) {
-        return std::make_unique<BoolType>();
-    }
+
+    // Для выражений, которые не могут определить тип самостоятельно (переменные, вызовы функций),
+    // используем таблицу символов.
     if (auto var = dynamic_cast<const VariableExpr*>(expr)) {
         Symbol* sym = lookupSymbol(var->name);
         if (sym && std::holds_alternative<VariableInfo>(*sym)) {
@@ -117,7 +115,15 @@ std::unique_ptr<Type> ScopeVisitor::getExprType(const Expr* expr) {
             return info.type->clone();
         }
     }
-    // Для остальных выражений – тип неизвестен
+    if (auto call = dynamic_cast<const CallExpr*>(expr)) {
+        Symbol* sym = lookupSymbol(call->functionName);
+        if (sym && std::holds_alternative<FunctionInfo>(*sym)) {
+            const FunctionInfo& info = std::get<FunctionInfo>(*sym);
+            if (!info.returnTypes.empty()) {
+                return info.returnTypes[0]->clone();
+            }
+        }
+    }
     return nullptr;
 }
 

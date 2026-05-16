@@ -11,17 +11,7 @@ public:
     void print(const TranslationUnit& tu);
 
     // Types
-    void visit(const VoidType&) override;
-    void visit(const IntType&) override;
-    void visit(const UnsignedType&) override;
-    void visit(const FloatType&) override;
-    void visit(const BoolType&) override;
-    void visit(const StringType&) override;
-    void visit(const NamedType&) override;
-    void visit(const PointerType&) override;
-    void visit(const ArrayType&) override;
-    void visit(const FunctionType&) override;
-    void visit(const TupleType&) override;
+    void visit(const Type&) override;
 
     // Expressions
     void visit(const IntLiteral&) override;
@@ -74,7 +64,6 @@ private:
     void increaseIndent() { currentIndent += indentStep; }
     void decreaseIndent() { currentIndent -= indentStep; }
     
-    void printType(const Type&);
     void printPointer(const PointerType&);
     void printArray(const ArrayType&);
     void printFunction(const FunctionType&);

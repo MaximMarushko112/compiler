@@ -3,17 +3,7 @@
 namespace Parsing {
 
 // Forward declarations
-class VoidType;
-class IntType;
-class UnsignedType;
-class FloatType;
-class BoolType;
-class StringType;
-class NamedType;
-class PointerType;
-class ArrayType;
-class FunctionType;
-class TupleType;
+class Type;
 
 class IntLiteral;
 class FloatLiteral;
@@ -59,17 +49,7 @@ public:
     virtual ~ASTVisitor() = default;
 
     // Types
-    virtual void visit(const VoidType&) {}
-    virtual void visit(const IntType&) {}
-    virtual void visit(const UnsignedType&) {}
-    virtual void visit(const FloatType&) {}
-    virtual void visit(const BoolType&) {}
-    virtual void visit(const StringType&) {}
-    virtual void visit(const NamedType&) {}
-    virtual void visit(const PointerType&) {}
-    virtual void visit(const ArrayType&) {}
-    virtual void visit(const FunctionType&) {}
-    virtual void visit(const TupleType&) {}
+    virtual void visit(const Type&) {}
 
     // Expressions
     virtual void visit(const IntLiteral&) {}
